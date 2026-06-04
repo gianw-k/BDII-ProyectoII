@@ -1,0 +1,50 @@
+[
+  {
+    "external_id": "s1",
+    "title": "Rio de Estrellas",
+    "artist": "Luna Gris",
+    "lyrics": "Bajo el cielo nocturno navega un rio de estrellas\nla luna gris ilumina las olas del mar\n\nNavega conmigo entre la niebla y la sal\nel rio de estrellas nos lleva a soñar"
+  },
+  {
+    "external_id": "s2",
+    "title": "Fuego en la Ciudad",
+    "artist": "Los Truenos",
+    "lyrics": "Fuego en la ciudad, las calles arden de pasion\nbailamos toda la noche al ritmo del tambor\n\nEl fuego nos llama, la ciudad despierta\ncorazones de fuego golpean sin parar"
+  },
+  {
+    "external_id": "s3",
+    "title": "Ocean Drive",
+    "artist": "Night Waves",
+    "lyrics": "Driving down the ocean road under city lights\nneon waves are calling me into the night\n\nThe ocean holds our secrets deep below the tide\nlost in city lights we ride the endless night"
+  },
+  {
+    "external_id": "s4",
+    "title": "Mountain Heart",
+    "artist": "Pine Echo",
+    "lyrics": "High up on the mountain where the cold wind blows\nmy heart is made of stone and falling snow\n\nThe mountain keeps me silent, the valley far below\na lonely heart of stone beneath the snow"
+  },
+  {
+    "external_id": "s5",
+    "title": "Lluvia de Abril",
+    "artist": "Camino Verde",
+    "lyrics": "Cae la lluvia de abril sobre el campo verde\nlas flores despiertan con la lluvia y el sol\n\nVerde es el camino que la lluvia florece\nabril nos regala su lluvia y su color"
+  },
+  {
+    "external_id": "s6",
+    "title": "Electric Dreams",
+    "artist": "Circuit",
+    "lyrics": "Electric dreams are glowing in the wires of the night\nrobots dance to circuits humming bright\n\nWe are electric, we are made of light\nelectric dreams will carry us tonight"
+  },
+  {
+    "external_id": "s7",
+    "title": "Corazon de Fuego",
+    "artist": "Los Truenos",
+    "lyrics": "Tu corazon de fuego enciende mi pasion\nbailamos en la noche bajo el tambor\n\nLlama de pasion, fuego de la ciudad\ndos corazones arden sin parar"
+  },
+  {
+    "external_id": "s8",
+    "title": "City Lights",
+    "artist": "Night Waves",
+    "lyrics": "City lights are shining on the ocean side tonight\nwe drive along the road into the light\n\nNeon and the ocean, the city and the night\nfollow all the lights until the morning bright"
+  }
+]

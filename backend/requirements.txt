@@ -1,0 +1,22 @@
+# API
+fastapi
+uvicorn[standard]
+python-multipart # uploads (foto, audio)
+pydantic-settings
+
+# DB
+psycopg2-binary
+pgvector
+SQLAlchemy
+
+# Engine - features
+numpy
+scipy
+scikit-learn # K-Means / K-Medoids, TF-IDF
+opencv-contrib-python # SIFT
+librosa# MFCC
+nltk # tokenizar, stopwords, stemming
+
+# Experimentos
+matplotlib
+pandas
