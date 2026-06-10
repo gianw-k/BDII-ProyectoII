@@ -7,7 +7,8 @@ Recorre el dataset y construye todo lo que la busqueda online consultara:
 
 Uso:
     python -m pipelines.ingest --app music --data backend/tests/fixtures/lyrics_sample.json
-    python -m pipelines.ingest --app music --data /data/spotify/lyrics.json --out /data/index/music_text --k 512
+    python -m pipelines.ingest --app music --data data/raw/spotify-lyrics/lyrics.parquet --limit 1000
+    python -m pipelines.ingest --app music --data /data/spotify/lyrics.csv --out /data/index/music_text --k 512
 """
 from __future__ import annotations
 import argparse
@@ -16,11 +17,59 @@ from pathlib import Path
 
 from app.core.config import settings
 
+# alias de columnas -> campo que espera build() (text_index.build)
+COLUMN_ALIASES = {
+    "external_id": ("external_id", "link", "id", "track_id", "uri"),
+    "title": ("title", "song", "name", "track", "track_name"),
+    "artist": ("artist", "artists", "artist_name", "performer"),
+    "lyrics": ("lyrics", "text", "content", "lyric"),
+}
 
-def ingest_music_text(data_path: str, out_dir: str, k: int, block_size: int) -> None:
+
+def _map_row(row: dict) -> dict:
+    """Mapea una fila cruda al schema {external_id,title,artist,lyrics}."""
+    out: dict = {}
+    lower = {str(c).lower(): c for c in row}
+    for field, aliases in COLUMN_ALIASES.items():
+        for a in aliases:
+            if a in lower:
+                out[field] = row[lower[a]]
+                break
+        else:
+            out[field] = None
+    return out
+
+
+def load_songs(data_path: str, limit: int | None = None) -> list[dict]:
+    """Carga canciones desde .json / .parquet / .csv y normaliza columnas."""
+    path = Path(data_path)
+    ext = path.suffix.lower()
+    if ext == ".json":
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    elif ext in (".parquet", ".csv"):
+        import pandas as pd
+        df = pd.read_parquet(path) if ext == ".parquet" else pd.read_csv(path)
+        if limit:
+            df = df.head(limit)
+        rows = df.to_dict(orient="records")
+    else:
+        raise ValueError(f"formato no soportado: {ext} (usa .json/.parquet/.csv)")
+
+    songs = [_map_row(r) for r in rows]
+    # external_id por defecto = indice si falta
+    for i, s in enumerate(songs):
+        if not s.get("external_id"):
+            s["external_id"] = str(i)
+    if limit:
+        songs = songs[:limit]
+    return songs
+
+
+def ingest_music_text(data_path: str, out_dir: str, k: int, block_size: int,
+                      limit: int | None = None) -> None:
     from app.apps.music.text_index import build
 
-    songs = json.loads(Path(data_path).read_text(encoding="utf-8"))
+    songs = load_songs(data_path, limit=limit)
     idx = build(songs, out_dir, k=k, block_size=block_size)
     print(
         f"[ingest] music/text listo: {len(idx.items)} canciones, "
@@ -34,16 +83,18 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Pipeline de indexacion multimodal")
     p.add_argument("--app", required=True, choices=["music", "ecommerce"])
     p.add_argument("--modality", default="text", choices=["text", "audio", "image"])
-    p.add_argument("--data", required=True, help="ruta al dataset (json para texto)")
+    p.add_argument("--data", required=True, help="ruta al dataset (.json/.parquet/.csv)")
     p.add_argument("--out", default=None, help="dir de salida de artefactos")
     p.add_argument("--k", type=int, default=settings.codebook_k)
     p.add_argument("--block-size", type=int, default=1000)
+    p.add_argument("--limit", type=int, default=None,
+                   help="usar solo las primeras N filas (cargas 1K/10K/100K)")
     args = p.parse_args()
 
     out = args.out or str(Path(settings.data_dir) / "index" / f"{args.app}_{args.modality}")
 
     if args.app == "music" and args.modality == "text":
-        ingest_music_text(args.data, out, args.k, args.block_size)
+        ingest_music_text(args.data, out, args.k, args.block_size, limit=args.limit)
     else:
         raise NotImplementedError(
             f"ingest {args.app}/{args.modality} aun no implementado "
