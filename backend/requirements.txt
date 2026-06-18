@@ -14,7 +14,7 @@ numpy
 scipy
 scikit-learn # K-Means / K-Medoids, TF-IDF
 opencv-contrib-python # SIFT
-librosa# MFCC
+librosa  # MFCC
 nltk # tokenizar, stopwords, stemming
 
 # Experimentos

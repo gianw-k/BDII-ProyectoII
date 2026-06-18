@@ -17,7 +17,8 @@ class ParagraphSplitter(Splitter):
         self.min_chars = min_chars
 
     def split(self, content: str) -> list[str]:
-        if content is None:
+        # robusto a None / NaN / numeros (algunos datasets traen letras vacias)
+        if not isinstance(content, str):
             return []
         parts = _PARA_RE.split(content.strip())
         chunks = [p.strip() for p in parts if len(p.strip()) >= self.min_chars]

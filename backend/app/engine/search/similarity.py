@@ -6,29 +6,38 @@ indice invertido frente a un scan denso.
 
     score[chunk] = sum_w  q_w * doc_w        (sobre codewords compartidas)
     cosine       = score / (||q|| * ||doc||)
+
+`search_sparse` es el corazon de todo y no le importa la modalidad: le pasas el
+histograma disperso de la query (venga de texto, imagen o audio) y listo.
+`search` es solo el atajo para texto: cuantiza el string y se lo pasa.
 """
 from __future__ import annotations
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
-import numpy as np
-
-from app.engine.codebook.linguistic import LinguisticCodebook
 from app.engine.index.histogram import to_sparse
 from app.engine.index.inverted import InvertedIndex
 
+if TYPE_CHECKING:
+    from app.engine.codebook.linguistic import LinguisticCodebook
 
-def search(
-    query: str,
-    codebook: LinguisticCodebook,
+SparseHist = list[tuple[int, float]]
+
+
+def search_sparse(
+    q_sparse: SparseHist,
     index: InvertedIndex,
     top_n: int = 10,
 ) -> list[tuple[int, float]]:
-    """texto query a [(chunk_id, score), ...] top-N ordenado desc."""
-    q_hist = codebook.quantize(query)
-    q_sparse = to_sparse(q_hist)
+    """Histograma disperso de la query -> [(chunk_id, score)] top-N de mayor a menor.
+
+    Esto lo comparten todas las modalidades. Damos por hecho que los pesos de los
+    postings ya vienen L2-normalizados; ||doc|| lo sacamos de index.norms (y si ya
+    estaba normalizado, vale 1.0).
+    """
     if not q_sparse:
         return []
-    q_norm = float(np.linalg.norm(q_hist)) or 1.0
+    q_norm = sum(w * w for _, w in q_sparse) ** 0.5 or 1.0
 
     scores: dict[int, float] = defaultdict(float)
     for word_idx, q_w in q_sparse:
@@ -41,3 +50,13 @@ def search(
         ranked.append((chunk_id, dot / denom))
     ranked.sort(key=lambda x: x[1], reverse=True)
     return ranked[:top_n]
+
+
+def search(
+    query: str,
+    codebook: "LinguisticCodebook",
+    index: InvertedIndex,
+    top_n: int = 10,
+) -> list[tuple[int, float]]:
+    """Atajo para texto: cuantiza el string y delega en search_sparse."""
+    return search_sparse(to_sparse(codebook.quantize(query)), index, top_n=top_n)
