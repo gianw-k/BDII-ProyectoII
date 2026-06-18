@@ -165,6 +165,25 @@ def plot(rows: list[dict], out_dir: Path) -> None:
     plt.xlabel("canciones"); plt.ylabel("recall@k vs indice propio")
     plt.title("Coincidencia de resultados"); plt.ylim(0, 1.05); plt.legend(); plt.grid(True, alpha=0.3)
     plt.savefig(out_dir / "recall_vs_size.png", dpi=120, bbox_inches="tight")
+
+    # throughput (consultas por segundo): mas alto = mejor
+    plt.figure()
+    for m in methods:
+        ys = [next(r["qps"] for r in rows if r["method"] == m and r["corpus_size"] == n) for n in sizes]
+        plt.plot(sizes, ys, marker="o", label=m)
+    plt.xlabel("canciones"); plt.ylabel("throughput (consultas/seg)")
+    plt.title("Throughput vs tamano de corpus"); plt.legend(); plt.grid(True, alpha=0.3)
+    plt.savefig(out_dir / "throughput_vs_size.png", dpi=120, bbox_inches="tight")
+
+    # memoria en disco de los indices nativos (el propio se mide en postings, aparte)
+    plt.figure()
+    for m in [x for x in methods if x != "inverted_index"]:
+        ys = [next(r["native_index_bytes"] for r in rows if r["method"] == m and r["corpus_size"] == n) / 1e6
+              for n in sizes]
+        plt.plot(sizes, ys, marker="^", label=m)
+    plt.xlabel("canciones"); plt.ylabel("tamano del indice (MB)")
+    plt.title("Memoria de los indices nativos"); plt.legend(); plt.grid(True, alpha=0.3)
+    plt.savefig(out_dir / "memory_vs_size.png", dpi=120, bbox_inches="tight")
     print(f"[bench] graficos -> {out_dir}")
 
 
