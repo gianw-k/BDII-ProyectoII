@@ -39,6 +39,27 @@ la arquitectura "agnóstica".
 El ingest acepta `.csv` / `.json` / `.parquet` y mapea columnas por alias, así
 que el dataset es intercambiable.
 
+### Cómo obtener los datos
+
+Los datasets **no están en el repo** (son pesados; van en `.gitignore`). Cada
+quien los baja una vez de Kaggle y los deja en `data/raw/`. Necesitas una cuenta
+de Kaggle y su CLI (`pip install kaggle` + tu token en `~/.kaggle/kaggle.json`).
+
+```bash
+# Música (CSV de letras)
+kaggle datasets download -d imuhammad/audio-features-and-lyrics-of-spotify-songs \
+  -p data/raw/spotify --unzip
+
+# Imágenes (versión small, ~592 MB)
+kaggle datasets download -d paramaggarwal/fashion-product-images-small \
+  -p data/raw/fashion --unzip
+```
+
+Tras esto debes tener `data/raw/spotify/spotify_songs.csv` y las imágenes en
+`data/raw/fashion/images/`. Sin token de Kaggle puedes bajarlos a mano desde la
+web del dataset y descomprimirlos en esas mismas carpetas. Luego corre el ingest
+(ver más abajo) para construir los índices.
+
 ## Implementación por módulo
 
 - **Split** — [paragraph.py](backend/app/engine/split/paragraph.py): parte el
@@ -61,33 +82,43 @@ que el dataset es intercambiable.
 
 ## Resultados experimentales
 
-Benchmark de texto sobre datos reales (Spotify), cargas de 1K/5K/10K canciones,
-25 consultas cada una. Generado con
+Benchmark de texto sobre datos reales (Spotify), cargas de 1K/5K/10K/18.454
+canciones, 30 consultas cada una. Generado con
 [experiments/benchmark.py](backend/experiments/benchmark.py).
 
-| Corpus | Enfoque | Latencia media | QPS | Recall@10 vs propio | Memoria índice |
-|--------|---------|---------------:|----:|--------------------:|---------------:|
-| 10K | Índice invertido (propio) | **4.5 ms** | **223** | 1.00 (ref.) | 38.8K postings |
-| 10K | GIN full-text | 11.6 ms | 87 | 0.08 | 12.6 MB |
-| 10K | pgvector coseno | 15.1 ms | 66 | 0.97 | 1.8 MB |
+Resultados con el corpus completo (18.454 canciones):
+
+| Enfoque | Latencia media | p95 | Throughput | Recall@10 vs propio |
+|---------|---------------:|----:|-----------:|--------------------:|
+| Índice invertido (propio) | **12.0 ms** | 15.9 ms | **83 q/s** | 1.00 (ref.) |
+| GIN full-text | 18.6 ms | 24.9 ms | 54 q/s | 0.04 |
+| pgvector coseno | 44.9 ms | 58.2 ms | 22 q/s | 0.97 |
 
 ![Latencia vs tamaño](backend/experiments/results/latency_vs_size.png)
+![Throughput vs tamaño](backend/experiments/results/throughput_vs_size.png)
 ![Recall vs tamaño](backend/experiments/results/recall_vs_size.png)
+![Memoria de índices nativos](backend/experiments/results/memory_vs_size.png)
 
 ### Análisis y trade-offs
 
-- **Latencia / throughput:** gana el índice invertido propio, y escala mejor
-  (crece casi lineal y plano; los nativos se disparan con el tamaño).
-- **pgvector** recupera casi lo mismo que el motor propio (recall ~0.97-0.99),
-  lógico porque ambos hacen coseno sobre los mismos histogramas. Su índice ocupa
-  mucho menos disco que el GIN, pero es el más lento en consulta.
-- **GIN** recupera un conjunto distinto (recall bajo): hace match booleano de
-  términos + `ts_rank`, no similitud de histograma. No es "peor", es otra
-  semántica de búsqueda; conviene cuando importa el match exacto de palabras.
+- **Latencia / throughput:** gana el índice invertido propio en todas las cargas
+  y escala mejor (crece casi lineal; los nativos se separan al subir el tamaño).
+- **Recall:** pgvector recupera casi lo mismo que el motor propio (~0.97), lógico
+  porque ambos hacen coseno sobre los mismos histogramas. GIN recupera un
+  conjunto distinto (recall ~0.04): hace match booleano de términos + `ts_rank`,
+  no similitud de histograma. No es "peor", es otra semántica de búsqueda.
+- **Memoria:** ver gráfico. *Nota:* la tabla `histograms` guarda también los
+  histogramas de las imágenes (e-commerce), así que su tamaño no es solo del
+  texto; tómese como cota superior.
 
 **Conclusión:** para búsqueda por similitud, el índice invertido + codebook gana
-en velocidad y memoria a costa de la cuantización (pierde matices). pgvector es
-la alternativa nativa más cercana en resultados; GIN es para full-text clásico.
+en velocidad a costa de la cuantización (pierde matices). pgvector es la
+alternativa nativa más cercana en *resultados*; GIN sirve para full-text clásico.
+
+> **Limitación honesta:** pgvector se midió **sin índice HNSW/IVF** (está
+> comentado en [01_init.sql](db/init/01_init.sql)), por lo que corre como scan
+> lineal — de ahí su latencia alta. Crear el índice ANN lo aceleraría bastante,
+> a cambio de una recall aproximada. Queda como mejora pendiente de la Fase 3.
 
 ## Instalación y uso
 
