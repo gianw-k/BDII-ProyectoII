@@ -48,14 +48,32 @@ export function EcommerceSearch() {
 
       {error && <p style={{ color: "crimson" }}>{error}</p>}
 
-      <ol style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 16 }}>
         {results.map((p, i) => (
-          <li key={i}>
-            {p.filename || p.external_id}{" "}
-            <span style={{ color: "#888" }}>({p.score})</span>
-          </li>
+          <div key={i} style={{ border: "1px solid #ddd", padding: 8, borderRadius: 8, textAlign: "center" }}>
+            {p.filename ? (
+              <img 
+                src={`/api/images/${p.filename}`} 
+                alt={p.filename} 
+                style={{ width: "100%", height: "150px", objectFit: "cover", borderRadius: 4 }} 
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = "none";
+                }}
+              />
+            ) : (
+              <div style={{ width: "100%", height: "150px", backgroundColor: "#f0f0f0", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span>No Image</span>
+              </div>
+            )}
+            <div style={{ marginTop: 8, fontSize: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.filename || p.external_id}>
+              {p.filename || p.external_id}
+            </div>
+            <div style={{ color: "#888", fontSize: "12px" }}>
+              Similitud: {p.score.toFixed(4)}
+            </div>
+          </div>
         ))}
-      </ol>
+      </div>
     </section>
   );
 }
