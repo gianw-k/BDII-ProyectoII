@@ -48,7 +48,7 @@ def build(songs: list[dict], out_dir: str | Path, k: int = 256,
 
     # codebook sobre toda la coleccion de chunks
     codebook = LinguisticCodebook(k=k)
-    codebook.build(c["content"] for c in chunks.values())
+    codebook.build(list(c["content"] for c in chunks.values()))
 
     # stream (chunk_id, sparse_hist) hacia SPIMI
     def stream():

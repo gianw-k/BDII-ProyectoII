@@ -54,13 +54,25 @@ class SIFTExtractor(Extractor):
             if img is None:
                 raise FileNotFoundError(f"no se pudo leer la imagen: {chunk}")
             return img
-        if isinstance(chunk, (bytes, bytearray)):
+        elif isinstance(chunk, (bytes, bytearray)):
             arr = np.frombuffer(bytes(chunk), dtype=np.uint8)
             img = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
             if img is None:
                 raise ValueError("bytes no decodificables como imagen")
-            return img
-        arr = np.asarray(chunk)
-        if arr.ndim == 3:
-            return cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
-        return arr
+        else:
+            arr = np.asarray(chunk)
+            if arr.ndim == 3:
+                img = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
+            else:
+                img = arr
+
+        # Estandarizar tamano para igualar escala del dataset original (~80px alto)
+        # SIFT extrae caracteristicas dependientes de la densidad local de pixeles.
+        # Evita que el vocabulario visual (codebook) colapse al comparar resoluciones extremas.
+        h, w = img.shape[:2]
+        if max(h, w) > 80:
+            scale = 80.0 / max(h, w)
+            new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+        return img
