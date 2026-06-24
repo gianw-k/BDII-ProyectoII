@@ -10,6 +10,11 @@ image_path = "/data/raw/fashion/images" if os.path.exists("/data/raw/fashion/ima
 if os.path.exists(image_path):
     app.mount("/images", StaticFiles(directory=image_path), name="images")
 
+# Servir archivos de audio GTZAN para reproduccion en el frontend
+audio_path = "/data/raw/music/genres_original"
+if os.path.exists(audio_path):
+    app.mount("/audio-files", StaticFiles(directory=audio_path), name="audio")
+
 app.include_router(ecommerce.router, prefix="/ecommerce", tags=["ecommerce"])
 app.include_router(music.router, prefix="/music", tags=["music"])
 app.include_router(compare.router, prefix="/compare", tags=["compare"])
