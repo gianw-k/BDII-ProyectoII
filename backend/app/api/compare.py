@@ -1,7 +1,8 @@
 """Comparativas: tu motor vs PostgreSQL nativo (GIN/GiST, pgvector).
 
-Misma consulta por los 3 (texto) o 2 (imagen) enfoques, devolviendo resultados
-+ latencia de cada uno. Es lo que alimenta los experimentos de la Fase 4.
+Misma consulta por los 3 (texto) o 2 (imagen/audio) enfoques, devolviendo
+resultados + latencia de cada uno. Es lo que alimenta los experimentos de la
+Fase 4.
 
 Requiere que los datos esten persistidos en Postgres (ingest --persist) y los
 artefactos del motor propio en disco (para el indice invertido propio).
@@ -14,7 +15,8 @@ from fastapi import APIRouter, HTTPException, Query
 from app.core.config import settings
 from app.comparisons import text as cmp_text
 from app.comparisons import image as cmp_image
-from app.api.music import _text_index            # reutiliza el indice de letras ya cargado
+from app.comparisons import audio as cmp_audio
+from app.api.music import _text_index, _acoustic_index   # reutiliza los indices ya cargados
 
 router = APIRouter()
 
@@ -60,5 +62,26 @@ def compare_vector(external_id: str = Query(...), top_n: int = settings.top_n):
         "methods": [
             cmp_image.own_search(idx, external_id, top_n),
             cmp_image.pgvector_search(conn, external_id, top_n),
+        ],
+    }
+
+
+@router.get("/audio")
+def compare_audio(
+    filename: str = Query(..., description="Nombre de la pista GTZAN (ej: blues.00000.wav)"),
+    top_n: int = settings.top_n,
+):
+    """Compara similitud acustica por: indice invertido propio vs pgvector.
+
+    Mide latencia y precision de ambas tecnicas para la misma consulta,
+    generando los datos que necesitan los experimentos de la Fase 4.
+    """
+    idx = _acoustic_index()
+    conn = _conn()
+    return {
+        "filename": filename,
+        "methods": [
+            cmp_audio.own_search(idx, filename, top_n),
+            cmp_audio.pgvector_search(conn, filename, top_n),
         ],
     }

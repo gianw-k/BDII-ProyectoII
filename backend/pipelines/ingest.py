@@ -10,11 +10,14 @@ Uso:
     python -m pipelines.ingest --app music --data data/raw/spotify-lyrics/lyrics.parquet --limit 1000
     python -m pipelines.ingest --app music --data /data/spotify/lyrics.csv --out /data/index/music_text --k 512
     python -m pipelines.ingest --app ecommerce --modality image --data data/raw/fashion/images --k 256
+    python -m pipelines.ingest --app music --modality audio --data data/raw/music/features_30_sec.csv --k 128
+    python -m pipelines.ingest --app music --modality audio --data data/raw/music/features_3_sec.csv --k 128
 """
 from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import numpy as np
 
 from app.core.config import settings
 
@@ -129,6 +132,66 @@ def ingest_ecommerce_image(data_path: str, out_dir: str, k: int, block_size: int
         _persist(visual_index_to_data(idx))
 
 
+def ingest_music_audio(
+    data_path: str,
+    out_dir: str,
+    k: int,
+    block_size: int,
+    limit: int | None = None,
+    persist: bool = False,
+) -> None:
+    """Indexa el dataset GTZAN (CSV de features MFCC) para busqueda acustica.
+
+    Cada fila del CSV es una ventana de audio (3s o 30s). Las filas se agrupan
+    por filename: cada pista aporta N vectores MFCC que se cuantizan juntos en
+    un histograma de acoustic words. Esto es el Bag-of-Acoustic-Words.
+
+    Compatible con:
+      - features_30_sec.csv  (1 fila/pista, 1000 pistas)
+      - features_3_sec.csv   (10 filas/pista, ~10000 filas)
+    """
+    import pandas as pd
+    from app.apps.music.acoustic_index import build
+    from app.engine.split.audio_window import AudioWindowSplitter, _MFCC_COLS
+
+    df = pd.read_csv(data_path)
+    if limit:
+        # limitar por numero de pistas unicas, no por filas
+        unique_files = df["filename"].unique()[:limit]
+        df = df[df["filename"].isin(unique_files)]
+
+    splitter = AudioWindowSplitter()
+
+    tracks, descriptors = [], []
+    for filename, group in df.groupby("filename"):
+        rows = group.to_dict(orient="records")
+        windows = splitter.split(rows)  # lista de arrays (dim,)
+        if not windows:
+            continue
+        # Apilar las ventanas en (n_windows, dim)
+        desc = np.stack(windows, axis=0).astype("float32")  # (n_windows, 40)
+        label = rows[0].get("label", "unknown")
+        tracks.append({
+            "filename": str(filename),
+            "label": str(label),
+            "n_windows": len(windows),
+        })
+        descriptors.append(desc)
+
+    if not tracks:
+        raise ValueError(f"No se encontraron pistas validas en {data_path}")
+
+    idx = build(tracks, descriptors, out_dir, k=k, block_size=block_size)
+    print(
+        f"[ingest] music/audio listo: {len(idx.tracks)} pistas, "
+        f"codebook k={idx.codebook.centroids.shape[0]} acoustic words, "
+        f"{idx.index.num_terms} terminos / {idx.index.num_postings} postings"
+    )
+    print(f"[ingest] artefactos en {out_dir}")
+    if persist:
+        pass  # TODO: persistir en Postgres (analogo a text_index_to_data)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Pipeline de indexacion multimodal")
     p.add_argument("--app", required=True, choices=["music", "ecommerce"])
@@ -138,7 +201,7 @@ def main() -> None:
     p.add_argument("--k", type=int, default=settings.codebook_k)
     p.add_argument("--block-size", type=int, default=1000)
     p.add_argument("--limit", type=int, default=None,
-                   help="usar solo las primeras N filas (cargas 1K/10K/100K)")
+                   help="limitar el numero de pistas indexadas (util para cargas 1K/10K)")
     p.add_argument("--persist", action="store_true",
                    help="ademas de los artefactos, cargar el indice en Postgres")
     args = p.parse_args()
@@ -148,13 +211,15 @@ def main() -> None:
     if args.app == "music" and args.modality == "text":
         ingest_music_text(args.data, out, args.k, args.block_size,
                           limit=args.limit, persist=args.persist)
+    elif args.app == "music" and args.modality == "audio":
+        ingest_music_audio(args.data, out, args.k, args.block_size,
+                           limit=args.limit, persist=args.persist)
     elif args.app == "ecommerce" and args.modality == "image":
         ingest_ecommerce_image(args.data, out, args.k, args.block_size,
                                limit=args.limit, persist=args.persist)
     else:
         raise NotImplementedError(
-            f"ingest {args.app}/{args.modality} aun no implementado "
-            "(falta el slice de audio)"
+            f"ingest {args.app}/{args.modality} no implementado todavia."
         )
 
 
