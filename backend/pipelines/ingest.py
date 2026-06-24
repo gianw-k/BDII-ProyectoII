@@ -162,17 +162,33 @@ def ingest_music_audio(
 
     splitter = AudioWindowSplitter()
 
+    # Derivar el nombre de la pista base a partir del filename del CSV.
+    # features_3_sec.csv usa filenames como "blues.00000.4.wav" (con segmento).
+    # features_30_sec.csv usa "blues.00000.wav" (sin segmento).
+    # Estrategia: si hay 3+ partes separadas por ".", el penultimo es el segmento.
+    def base_track(fname: str) -> str:
+        """blues.00000.4.wav → blues.00000.wav  |  blues.00000.wav → blues.00000.wav"""
+        parts = str(fname).rsplit(".", 2)
+        # "blues.00000.4.wav"  → parts = ["blues.00000", "4", "wav"]  → len=3
+        # "blues.00000.wav"    → parts = ["blues.00000", "wav"]       → len=2
+        if len(parts) == 3 and parts[1].isdigit():
+            return f"{parts[0]}.{parts[2]}"   # strip el segmento numerico
+        return str(fname)
+
+    # Añadir columna de pista base y agrupar por ella
+    df["_base"] = df["filename"].apply(base_track)
+
     tracks, descriptors = [], []
-    for filename, group in df.groupby("filename"):
+    for base_filename, group in df.groupby("_base"):
         rows = group.to_dict(orient="records")
-        windows = splitter.split(rows)  # lista de arrays (dim,)
+        windows = splitter.split(rows)  # lista de arrays (dim,) por ventana
         if not windows:
             continue
         # Apilar las ventanas en (n_windows, dim)
         desc = np.stack(windows, axis=0).astype("float32")  # (n_windows, 40)
         label = rows[0].get("label", "unknown")
         tracks.append({
-            "filename": str(filename),
+            "filename": str(base_filename),   # nombre real del .wav en disco
             "label": str(label),
             "n_windows": len(windows),
         })
