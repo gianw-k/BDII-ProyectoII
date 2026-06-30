@@ -1,0 +1,7 @@
+method,ef_search,mean_ms,p95_ms,qps,recall_at_k
+pgvector_exact,,54.3853,58.974,18.4,1.0
+pgvector_hnsw,10,0.8245,1.771,1212.9,0.55
+pgvector_hnsw,20,0.733,0.897,1364.2,0.705
+pgvector_hnsw,40,0.9681,1.229,1032.9,0.845
+pgvector_hnsw,80,1.1616,1.582,860.9,0.89
+pgvector_hnsw,160,1.7109,2.315,584.5,0.922

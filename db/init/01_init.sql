@@ -37,8 +37,18 @@ CREATE TABLE IF NOT EXISTS histograms (
     hist      vector NOT NULL           -- histograma normalizado para pgvector
 );
 
--- Indice pgvector (crear tras carga; ejemplo HNSW coseno)
--- CREATE INDEX ON histograms USING hnsw (hist vector_cosine_ops);
+-- Indice HNSW coseno para la busqueda aproximada con pgvector.
+-- `hist` es `vector` sin dimension y HNSW necesita una fija, asi que indexamos
+-- la expresion casteada a vector(256) (la k del codebook), con un indice parcial
+-- por modalidad. La query usa `hist::vector(256)` para que el planner lo tome.
+-- Sin estos indices pgvector corre como Seq Scan (busqueda exacta); con ellos,
+-- aproximada.
+CREATE INDEX IF NOT EXISTS idx_hist_hnsw_text
+    ON histograms USING hnsw ((hist::vector(256)) vector_cosine_ops)
+    WHERE modality = 'text';
+CREATE INDEX IF NOT EXISTS idx_hist_hnsw_image
+    ON histograms USING hnsw ((hist::vector(256)) vector_cosine_ops)
+    WHERE modality = 'image';
 
 -- Indice invertido propio (tu implementacion, via SPIMI para texto)
 -- codeword: postings (chunk_id, freq)
@@ -50,6 +60,10 @@ CREATE TABLE IF NOT EXISTS inverted_index (
     PRIMARY KEY (modality, word_idx, chunk_id)
 );
 CREATE INDEX IF NOT EXISTS idx_inverted_word ON inverted_index (modality, word_idx);
+-- chunk_id no es leftmost en el PK, asi que la FK ON DELETE CASCADE no tenia
+-- indice util: cada reset (DELETE) hacia un seq scan de postings por chunk =
+-- O(n^2). Este indice lo arregla.
+CREATE INDEX IF NOT EXISTS idx_inverted_chunk ON inverted_index (chunk_id);
 
 -- Comparativa texto nativa: tsvector + GIN (letras de canciones)
 ALTER TABLE chunks ADD COLUMN IF NOT EXISTS tsv tsvector;

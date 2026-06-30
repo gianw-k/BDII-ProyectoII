@@ -30,6 +30,7 @@ class KMeansCodebook(Codebook):
         self.batch_size = batch_size
         self.centroids: np.ndarray | None = None   # (k_eff, dim)
         self.dim: int | None = None
+        self.idf: np.ndarray = np.array([])  # (k_eff,) peso IDF por visual word
 
     # ------------------------------------------------------------------ build
     def build(self, all_features: Iterable[np.ndarray]) -> None:
@@ -41,7 +42,10 @@ class KMeansCodebook(Codebook):
         """
         from sklearn.cluster import MiniBatchKMeans
 
-        stacked = _stack(all_features)
+        # Materializamos por item: lo necesitamos dos veces (clustering y DF).
+        items = [np.atleast_2d(np.asarray(f, dtype=np.float32)) for f in all_features]
+        items = [a for a in items if a.size]
+        stacked = np.vstack(items) if items else np.empty((0, 0), dtype=np.float32)
         if stacked.size == 0:
             raise ValueError("no hay descriptores para construir el codebook")
         self.dim = int(stacked.shape[1])
@@ -55,6 +59,17 @@ class KMeansCodebook(Codebook):
         )
         km.fit(stacked)
         self.centroids = km.cluster_centers_.astype(np.float32)
+
+        # IDF por visual word: en cuantos items aparece cada centroide (DF).
+        # Mismo criterio que el codebook de texto: log10(N / df). Una visual
+        # word que cae en casi todas las imagenes (fondos, bordes comunes) pesa
+        # poco; una rara y discriminativa pesa mucho.
+        N = len(items)
+        df = np.zeros(self.centroids.shape[0], dtype=np.float64)
+        for arr in items:
+            present = np.unique(self._assign(arr))
+            df[present] += 1.0
+        self.idf = np.log10(N / np.maximum(df, 1.0)).astype(np.float32)
 
     # --------------------------------------------------------------- quantize
     def quantize(self, features: np.ndarray) -> np.ndarray:
@@ -71,6 +86,9 @@ class KMeansCodebook(Codebook):
         labels = self._assign(feats)
         counts = np.bincount(labels, minlength=k).astype(np.float32)
         hist[: counts.shape[0]] = counts
+        # TF-IDF: pesa cada visual word por su IDF (si el codebook lo trae).
+        if self.idf.size == k:
+            hist = hist * self.idf
         norm = np.linalg.norm(hist)
         if norm > 0:
             hist /= norm
@@ -90,7 +108,9 @@ class KMeansCodebook(Codebook):
         """Guarda los centroides (.npz) + la meta (.json). `path` = nombre base."""
         base = Path(path)
         base.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(base.with_suffix(".npz"), centroids=self.centroids)
+        np.savez_compressed(
+            base.with_suffix(".npz"), centroids=self.centroids, idf=self.idf
+        )
         base.with_suffix(".json").write_text(
             json.dumps({"k": self.k, "dim": self.dim, "seed": self.seed}),
             encoding="utf-8",
@@ -102,7 +122,9 @@ class KMeansCodebook(Codebook):
         meta = json.loads(base.with_suffix(".json").read_text(encoding="utf-8"))
         cb = cls(k=meta["k"], seed=meta.get("seed", 0))
         cb.dim = meta.get("dim")
-        cb.centroids = np.load(base.with_suffix(".npz"))["centroids"].astype(np.float32)
+        data = np.load(base.with_suffix(".npz"))
+        cb.centroids = data["centroids"].astype(np.float32)
+        cb.idf = data["idf"].astype(np.float32) if "idf" in data else np.array([])
         return cb
 
     # to_dict / from_dict: comodo para tests y codebooks chicos (todo en un JSON)
@@ -112,6 +134,7 @@ class KMeansCodebook(Codebook):
             "dim": self.dim,
             "seed": self.seed,
             "centroids": [] if self.centroids is None else self.centroids.tolist(),
+            "idf": self.idf.tolist(),
         }
 
     @classmethod
@@ -120,6 +143,7 @@ class KMeansCodebook(Codebook):
         cb.dim = d.get("dim")
         cent = d.get("centroids") or []
         cb.centroids = np.asarray(cent, dtype=np.float32) if cent else None
+        cb.idf = np.asarray(d.get("idf", []), dtype=np.float32)
         return cb
 
 
