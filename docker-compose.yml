@@ -20,6 +20,7 @@ services:
     build: ./backend
     environment:
       DATABASE_URL: postgresql://bdii:bdii@db:5432/multimodal
+      IMAGE_MAX_SIDE: 512
     ports:
       - "8000:8000"
     volumes:

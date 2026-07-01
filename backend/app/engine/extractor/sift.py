@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from app.engine.base import Extractor
+from app.core.config import settings
 
 _DIM = 128
 
@@ -53,7 +54,6 @@ class SIFTExtractor(Extractor):
             img = cv2.imread(str(chunk), cv2.IMREAD_GRAYSCALE)
             if img is None:
                 raise FileNotFoundError(f"no se pudo leer la imagen: {chunk}")
-            return img
         elif isinstance(chunk, (bytes, bytearray)):
             arr = np.frombuffer(bytes(chunk), dtype=np.uint8)
             img = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
@@ -66,12 +66,14 @@ class SIFTExtractor(Extractor):
             else:
                 img = arr
 
-        # Estandarizar tamano para igualar escala del dataset original (~80px alto)
-        # SIFT extrae caracteristicas dependientes de la densidad local de pixeles.
-        # Evita que el vocabulario visual (codebook) colapse al comparar resoluciones extremas.
+        # Estandarizar el lado mayor antes de extraer. SIFT depende de la densidad
+        # local de pixeles, asi que ingest y query deben usar el mismo tope para que
+        # el vocabulario visual (codebook) no colapse al comparar resoluciones.
+        # Configurable via settings.image_max_side (env IMAGE_MAX_SIDE).
+        max_side = settings.image_max_side
         h, w = img.shape[:2]
-        if max(h, w) > 80:
-            scale = 80.0 / max(h, w)
+        if max(h, w) > max_side:
+            scale = max_side / max(h, w)
             new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
             img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
 

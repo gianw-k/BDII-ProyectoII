@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     data_dir: str = "/data"
     codebook_k: int = 256  # tamano del codebook (perilla central de trade-offs)
     top_n: int = 10        # resultados por consulta
+    image_max_side: int = 512
 
 
 settings = Settings()
