@@ -46,8 +46,9 @@ CREATE TABLE IF NOT EXISTS histograms (
 CREATE INDEX IF NOT EXISTS idx_hist_hnsw_text
     ON histograms USING hnsw ((hist::vector(256)) vector_cosine_ops)
     WHERE modality = 'text';
+-- imagen fusiona SIFT (256) + color HSV (32) = 288 dimensiones
 CREATE INDEX IF NOT EXISTS idx_hist_hnsw_image
-    ON histograms USING hnsw ((hist::vector(256)) vector_cosine_ops)
+    ON histograms USING hnsw ((hist::vector(288)) vector_cosine_ops)
     WHERE modality = 'image';
 
 -- Indice invertido propio (tu implementacion, via SPIMI para texto)

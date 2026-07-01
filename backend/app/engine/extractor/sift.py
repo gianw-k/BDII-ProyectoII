@@ -48,6 +48,11 @@ class SIFTExtractor(Extractor):
             return np.empty((0, _DIM), dtype=np.float32)
         return desc.astype(np.float32)
 
+    def color_histogram(self, chunk) -> np.ndarray:
+        """Histograma de color HSV de la imagen (lo que SIFT no ve). Ver color.py."""
+        from app.engine.extractor.color import hsv_histogram
+        return hsv_histogram(chunk)
+
     @staticmethod
     def _to_gray(chunk, cv2) -> np.ndarray:
         if isinstance(chunk, (str, Path)):

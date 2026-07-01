@@ -97,8 +97,9 @@ def _persist(data) -> None:
 
 
 def ingest_ecommerce_image(data_path: str, out_dir: str, k: int, block_size: int,
-                           limit: int | None = None, persist: bool = False) -> None:
-    """Indexa una carpeta de imagenes de productos (SIFT -> visual words)."""
+                           limit: int | None = None, persist: bool = False,
+                           color_weight: float = 0.5) -> None:
+    """Indexa una carpeta de imagenes de productos (SIFT + color HSV -> histograma)."""
     from app.apps.ecommerce.visual_index import build
     from app.engine.extractor.sift import SIFTExtractor
 
@@ -111,19 +112,22 @@ def ingest_ecommerce_image(data_path: str, out_dir: str, k: int, block_size: int
         raise ValueError(f"no se encontraron imagenes en {data_path}")
 
     extractor = SIFTExtractor()
-    items, descriptors = [], []
+    items, descriptors, colors = [], [], []
     for p in paths:
         desc = extractor.extract(p)
         if desc.shape[0] == 0:        # imagen sin keypoints: la saltamos
             continue
         items.append({"external_id": p.stem, "filename": p.name, "path": str(p)})
         descriptors.append(desc)
+        colors.append(extractor.color_histogram(p))
 
-    idx = build(items, descriptors, out_dir, k=k, block_size=block_size)
+    idx = build(items, descriptors, out_dir, k=k, block_size=block_size,
+                colors=colors, color_weight=color_weight)
     total = sum(d.shape[0] for d in descriptors)
     print(
         f"[ingest] ecommerce/image listo: {len(idx.items)} productos, "
         f"{total} descriptores SIFT, codebook k={idx.codebook.centroids.shape[0]}, "
+        f"color_weight={idx.color_weight} (+{idx.color_dim} bins), "
         f"{idx.index.num_terms} visual words / {idx.index.num_postings} postings"
     )
     print(f"[ingest] artefactos en {out_dir}")
@@ -220,6 +224,8 @@ def main() -> None:
                    help="limitar el numero de pistas indexadas (util para cargas 1K/10K)")
     p.add_argument("--persist", action="store_true",
                    help="ademas de los artefactos, cargar el indice en Postgres")
+    p.add_argument("--color-weight", type=float, default=0.5,
+                   help="peso del color HSV en imagen (0 = solo SIFT, 1 = solo color)")
     args = p.parse_args()
 
     out = args.out or str(Path(settings.data_dir) / "index" / f"{args.app}_{args.modality}")
@@ -232,7 +238,8 @@ def main() -> None:
                            limit=args.limit, persist=args.persist)
     elif args.app == "ecommerce" and args.modality == "image":
         ingest_ecommerce_image(args.data, out, args.k, args.block_size,
-                               limit=args.limit, persist=args.persist)
+                               limit=args.limit, persist=args.persist,
+                               color_weight=args.color_weight)
     else:
         raise NotImplementedError(
             f"ingest {args.app}/{args.modality} no implementado todavia."

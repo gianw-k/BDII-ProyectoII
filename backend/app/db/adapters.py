@@ -41,8 +41,8 @@ def visual_index_to_data(index, app: str = "ecommerce") -> IndexData:
     producto), asi que el chunk_id local coincide con el item_id local.
     """
     chunks = {item_id: (item_id, 0, None) for item_id in index.items}
-    k = index.codebook.centroids.shape[0]
-    histograms = _dense_from_postings(index.index.postings, chunks.keys(), k)
+    # hist_dim = visual words + bins de color (si se fusiono el color)
+    histograms = _dense_from_postings(index.index.postings, chunks.keys(), index.hist_dim)
     return IndexData(
         app=app,
         modality="image",

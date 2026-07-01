@@ -38,11 +38,14 @@ def _extractor() -> SIFTExtractor:
 async def search_by_image(file: UploadFile = File(...), top_n: int = Query(settings.top_n)):
     """Sube una foto y devuelve top-N productos visualmente similares."""
     data = await file.read()
+    idx = _visual_index()
     try:
         descriptors = _extractor().extract(data)
+        # el color solo hace falta si el indice se construyo con el fusionado
+        color = _extractor().color_histogram(data) if idx.color_weight > 0 else None
     except (RuntimeError, ValueError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     if descriptors.shape[0] == 0:
         raise HTTPException(status_code=422, detail="no se detectaron keypoints SIFT en la imagen")
-    results = _visual_index().search(descriptors, top_n=top_n)
+    results = idx.search(descriptors, top_n=top_n, query_color=color)
     return {"count": len(results), "results": results}
