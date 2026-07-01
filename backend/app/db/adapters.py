@@ -54,6 +54,27 @@ def visual_index_to_data(index, app: str = "ecommerce") -> IndexData:
     )
 
 
+def audio_index_to_data(index, app: str = "music") -> IndexData:
+    """AcousticIndex -> IndexData (modalidad audio).
+
+    Igual que imagen: cada pista es item y chunk a la vez (un histograma de
+    acoustic words por pista). El histograma denso tiene largo k = numero de
+    acoustic words del codebook (sin color).
+    """
+    chunks = {track_id: (track_id, 0, None) for track_id in index.tracks}
+    k = int(index.codebook.centroids.shape[0])
+    histograms = _dense_from_postings(index.index.postings, chunks.keys(), k)
+    return IndexData(
+        app=app,
+        modality="audio",
+        items=index.tracks,
+        chunks=chunks,
+        centroids=index.codebook.centroids,
+        postings=index.index.postings,
+        histograms=histograms,
+    )
+
+
 def _dense_from_postings(postings, chunk_ids, k: int) -> dict[int, np.ndarray]:
     """Reconstruye el histograma denso de cada chunk a partir del indice invertido."""
     hist = {cid: np.zeros(k, dtype=np.float32) for cid in chunk_ids}

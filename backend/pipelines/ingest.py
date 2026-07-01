@@ -209,7 +209,8 @@ def ingest_music_audio(
     )
     print(f"[ingest] artefactos en {out_dir}")
     if persist:
-        pass  # TODO: persistir en Postgres (analogo a text_index_to_data)
+        from app.db.adapters import audio_index_to_data
+        _persist(audio_index_to_data(idx))
 
 
 def main() -> None:

@@ -50,6 +50,10 @@ CREATE INDEX IF NOT EXISTS idx_hist_hnsw_text
 CREATE INDEX IF NOT EXISTS idx_hist_hnsw_image
     ON histograms USING hnsw ((hist::vector(288)) vector_cosine_ops)
     WHERE modality = 'image';
+-- audio: histograma de acoustic words (k=128 del codebook MFCC)
+CREATE INDEX IF NOT EXISTS idx_hist_hnsw_audio
+    ON histograms USING hnsw ((hist::vector(128)) vector_cosine_ops)
+    WHERE modality = 'audio';
 
 -- Indice invertido propio (tu implementacion, via SPIMI para texto)
 -- codeword: postings (chunk_id, freq)
