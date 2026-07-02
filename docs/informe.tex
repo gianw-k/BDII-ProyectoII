@@ -5,13 +5,11 @@
 %  Formato: IEEE conference (IEEEtran).
 %  Compilar: pdflatex informe.tex  (dos veces, para refs y numeracion)
 %  Las figuras salen de ../backend/experiments/results/ (los benchmarks las
-%  generan). Si compilas desde otra carpeta (p.ej. Overleaf), sube los PNG
-%  y ajusta \graphicspath.
+%  generan). Si compilas en Overleaf, sube los PNG y ajusta \graphicspath.
 % ============================================================================
 \documentclass[conference]{IEEEtran}
 \IEEEoverridecommandlockouts
 
-\usepackage{cite}
 \usepackage{amsmath,amssymb,amsfonts}
 \usepackage{algorithmic}
 \usepackage{algorithm}
@@ -51,10 +49,7 @@
 % Si hay mas integrantes, agregarlos aqui separados por coma
 \author{
 \IEEEauthorblockN{Jyns Arturo Ordóñez Del Carpio, Denzel Bautista, Gian Aedo}
-\IEEEauthorblockA{
-  \textit{Curso: Base de Datos II (CS2042)}\\
-  \textit{Universidad de Ingeniería y Tecnología (UTEC)}\\
-  Lima, Perú}
+\IEEEauthorblockA{Base de Datos II (CS2042) --- UTEC --- Lima, Perú}
 }
 
 \maketitle
@@ -67,18 +62,18 @@ arquitectura --- \textit{split} $\rightarrow$ extractor $\rightarrow$
 coseno --- a tres modalidades de contenido: texto (18\,454 letras de
 canciones), imagen (44\,326 productos de moda) y audio (1\,000 pistas de
 GTZAN). Cada modalidad solo cambia el extractor de características (tokens
-lingüísticos, SIFT \cite{b2} o MFCC) y la construcción del diccionario
-(top-$k$ de palabras o K-Means, siguiendo el esquema \textit{Bag of Visual
-Words} \cite{b3}); el índice invertido se construye con SPIMI \cite{b1} y los
-histogramas se ponderan con TF-IDF sublineal. Sobre el motor se implementan
-tres aplicaciones (búsqueda visual e-commerce, búsqueda musical por letra y
-por similitud acústica, y una consola de consultas multimodal) y se compara
-contra las técnicas nativas de PostgreSQL: \texttt{GIN} full-text para texto y
-\texttt{pgvector} con índice HNSW \cite{b4} para vectores. Los experimentos
-muestran que el índice propio y \texttt{pgvector} recuperan exactamente los
-mismos resultados (recall $=1.0$), que el índice propio domina la latencia
-hasta corpus medianos, y que HNSW acelera la búsqueda vectorial
-12--32$\times$ con recall de hasta $0.96$.
+lingüísticos, SIFT o MFCC) y la construcción del diccionario (top-$k$ de
+palabras o K-Means, siguiendo el esquema \textit{Bag of Visual Words}); el
+índice invertido se construye con SPIMI y los histogramas se ponderan con
+TF-IDF sublineal. Sobre el motor se implementan tres aplicaciones (búsqueda
+visual e-commerce, búsqueda musical por letra y por similitud acústica, y una
+consola de consultas multimodal) y se compara contra las técnicas nativas de
+PostgreSQL: \texttt{GIN} full-text para texto y \texttt{pgvector} con índice
+HNSW para vectores. Los experimentos muestran que el índice propio y
+\texttt{pgvector} recuperan exactamente los mismos resultados
+(recall $=1.0$), que el índice propio domina la latencia hasta corpus
+medianos, y que HNSW acelera la búsqueda vectorial 12--32$\times$ con recall
+de hasta $0.96$.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -110,7 +105,8 @@ El backend soporta tres aplicaciones (el enunciado exige al menos dos):
   \item \textbf{Búsqueda visual e-commerce}: el usuario sube una foto y
         recibe los productos más similares.
   \item \textbf{Búsqueda musical}: por letra (full-text) y por similitud
-        acústica (subiendo un audio o eligiendo una pista).
+        acústica (subiendo un audio o eligiendo una pista, con reproducción
+        de las pistas del dataset desde la interfaz).
   \item \textbf{Consola de consultas multimodal}: un mini-lenguaje tipo SQL
         que unifica las búsquedas de las tres modalidades.
 \end{enumerate}
@@ -161,7 +157,7 @@ modalidad; el índice y la búsqueda se comparten.}
 \textbf{Etapa} & \textbf{Texto} & \textbf{Imagen} & \textbf{Audio} \\
 \midrule
 Split      & estrofas & imagen del producto & ventanas de 3\,s \\
-Extractor  & tokens (nltk) & SIFT 128-d \cite{b2} & MFCC 40-d \\
+Extractor  & tokens (nltk) & SIFT 128-d & MFCC 40-d \\
 Codebook   & top-$k$, $k{=}1024$ & K-Means, $k{=}512$ & K-Means, $k{=}128$ \\
 Ponderación& \multicolumn{3}{c}{$\log(1{+}\mathrm{tf})\cdot\mathrm{idf}$, normalización $L_2$} \\
 Índice     & \multicolumn{3}{c}{SPIMI $\rightarrow$ índice invertido (compartido)} \\
@@ -169,6 +165,171 @@ Búsqueda   & \multicolumn{3}{c}{coseno por acumuladores (compartida)} \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+% ══════════════════════════════════════════════════════════════
+\section{Estructura del Repositorio}
+
+El código está organizado para que la arquitectura unificada se lea
+directamente del árbol de carpetas: el \emph{motor} genérico vive en
+\texttt{engine/} y no sabe nada de canciones ni de productos; las
+aplicaciones lo orquestan desde \texttt{apps/} y lo exponen por HTTP en
+\texttt{api/}.
+
+\begin{lstlisting}
+backend/
+  app/
+    engine/        motor generico (agnostico)
+      split/         parrafos / ventanas de audio
+      extractor/     sift, mfcc, color hsv
+      codebook/      linguistico y k-means
+      index/         spimi, indice invertido,
+                     histogramas
+      search/        busqueda coseno compartida
+      query/         parser del mini-lenguaje SQL
+    apps/          orquestadores por aplicacion
+      music/         text_index, acoustic_index
+      ecommerce/     visual_index
+    api/           routers FastAPI: music,
+                   ecommerce, compare, query
+    comparisons/   propio vs GIN vs pgvector
+                   (text, image, audio, ann)
+    db/            sesion, repositorio y
+                   adaptadores de persistencia
+    core/          configuracion (k, rutas)
+  pipelines/       ingest offline por modalidad
+                   (+ --persist a Postgres)
+  experiments/     benchmarks Fase 4 y results/
+                   (CSV + graficos de este informe)
+  tests/           suite pytest (motor y DB)
+frontend/          UI React + Vite (3 pestanas)
+db/init/           01_init.sql: schema + pgvector
+                   + indices HNSW y GIN
+docker-compose.yml db + backend + frontend
+docs/              informe.tex y MANUAL.md
+\end{lstlisting}
+
+La separación tiene una regla simple: \texttt{engine/} solo conoce vectores e
+histogramas (por eso el mismo índice y la misma búsqueda sirven para las tres
+modalidades); \texttt{apps/} conoce los datasets y arma cada índice;
+\texttt{api/} solo traduce HTTP a llamadas del motor; y \texttt{db/} es la
+única capa que habla con PostgreSQL. Los artefactos de índice que produce el
+\textit{ingest} (codebook, índice invertido y metadatos) se guardan en
+\texttt{data/index/} y los datasets crudos en \texttt{data/raw/}; ninguno de
+los dos se versiona en el repositorio.
+
+% ══════════════════════════════════════════════════════════════
+\section{Entregables}
+
+\begin{itemize}
+  \item \textbf{Repositorio GitHub} con el código fuente documentado y
+        planificación en GitHub Projects.
+  \item \textbf{Docker Compose} que levanta PostgreSQL con la extensión
+        \texttt{pgvector}, el backend (FastAPI) y el frontend (React), con
+        el esquema inicializado automáticamente desde
+        \texttt{db/init/01\_init.sql}.
+  \item \textbf{Tres aplicaciones funcionando} sobre el mismo motor:
+        búsqueda visual e-commerce, búsqueda musical (letra + similitud
+        acústica con reproducción de pistas) y consola de consultas
+        multimodal.
+  \item \textbf{Comparativas de la Fase 3}: GIN full-text y pgvector (exacto
+        y HNSW), expuestas como endpoints \texttt{/compare/*} para
+        demostrarlas en vivo.
+  \item \textbf{Evaluación experimental de la Fase 4}: scripts de benchmark
+        que generan los CSV y los gráficos incluidos en este informe
+        (\texttt{backend/experiments/results/}).
+  \item \textbf{Documentación}: este informe técnico y un manual de usuario
+        (\texttt{docs/MANUAL.md}) con el uso de cada pestaña de la interfaz.
+\end{itemize}
+
+% ══════════════════════════════════════════════════════════════
+\section{Instalación y Uso}
+
+\subsection{Requisitos}
+Docker (Compose incluido) y una cuenta de Kaggle para descargar los
+datasets. No hace falta instalar Python ni Node en la máquina: todo corre en
+contenedores.
+
+\subsection{Levantar el sistema}
+\begin{lstlisting}
+docker compose up --build
+# db:5432  backend:8000  frontend:5173
+\end{lstlisting}
+
+\subsection{Descargar los datasets}
+Los datasets no están en el repositorio (van en \texttt{.gitignore} por
+tamaño). Se descargan una vez de Kaggle y se dejan en \texttt{data/raw/}:
+
+\begin{lstlisting}
+# letras de canciones (texto)
+kaggle datasets download \
+  -d imuhammad/audio-features-and-lyrics-of-spotify-songs \
+  -p data/raw/spotify --unzip
+
+# productos de moda (imagen)
+kaggle datasets download \
+  -d paramaggarwal/fashion-product-images-small \
+  -p data/raw/fashion --unzip
+
+# pistas GTZAN (audio: csv de features + wavs)
+kaggle datasets download \
+  -d andradaolteanu/gtzan-dataset-music-genre-classification \
+  -p data/raw/music --unzip
+\end{lstlisting}
+
+\subsection{Construir los índices (ingest)}
+El \textit{ingest} corre una vez por modalidad: construye el codebook y el
+índice invertido, guarda los artefactos en \texttt{data/index/} y, con
+\texttt{--persist}, escribe todo en PostgreSQL:
+
+\begin{lstlisting}
+# texto (k=1024)
+docker compose exec backend \
+  python -m pipelines.ingest --app music \
+  --data /data/raw/spotify/spotify_songs.csv \
+  --k 1024 --persist
+
+# imagen (k=512 + color)
+docker compose exec backend \
+  python -m pipelines.ingest --app ecommerce \
+  --modality image \
+  --data /data/raw/fashion/images \
+  --k 512 --persist
+
+# audio (k=128)
+docker compose exec backend \
+  python -m pipelines.ingest --app music \
+  --modality audio \
+  --data /data/raw/music/features_3_sec.csv \
+  --k 128 --persist
+\end{lstlisting}
+
+\subsection{Usar las aplicaciones}
+\begin{itemize}
+  \item \textbf{Interfaz gráfica}: \url{http://localhost:5173}, con una
+        pestaña por aplicación.
+  \item \textbf{API (Swagger)}: \url{http://localhost:8000/docs}.
+  \item \textbf{Comparativas en vivo}: \texttt{GET /compare/text?q=...},
+        \texttt{GET /compare/vector?external\_id=...} y
+        \texttt{GET /compare/audio?filename=...} devuelven los resultados y
+        la latencia de cada técnica para la misma consulta.
+\end{itemize}
+
+\subsection{Reproducir los experimentos}
+\begin{lstlisting}
+# comparativa de texto (4 tamanos de corpus)
+docker compose exec backend \
+  python -m experiments.benchmark \
+  --data /data/raw/spotify/spotify_songs.csv \
+  --sizes 1000 5000 10000 18454
+
+# HNSW vs busqueda exacta
+docker compose exec backend \
+  python -m experiments.ann_benchmark
+\end{lstlisting}
+Ambos scripts regeneran los CSV y los gráficos de
+\texttt{backend/experiments/results/} usados en este informe. La suite de
+tests se corre con \texttt{pytest} desde \texttt{backend/} (los tests de
+Postgres se saltan si no hay base disponible).
 
 % ══════════════════════════════════════════════════════════════
 \section{Datasets}
@@ -179,14 +340,14 @@ Búsqueda   & \multicolumn{3}{c}{coseno por acumuladores (compartida)} \\
   \item \textbf{Imagen:} \textit{Fashion Product Images (Small)} (Kaggle):
         44\,326 fotos de productos de moda ($\sim$965\,000 descriptores SIFT
         en total).
-  \item \textbf{Audio:} \textit{GTZAN} \cite{b5}: 1\,000 pistas de 30\,s en
+  \item \textbf{Audio:} \textit{GTZAN} (Kaggle): 1\,000 pistas de 30\,s en
         10 géneros; se usan las ventanas de 3\,s con 20 MFCC (media +
-        varianza $=40$ características por ventana).
+        varianza $=40$ características por ventana) y los \texttt{.wav} para
+        la reproducción desde la interfaz.
 \end{itemize}
 
-Los datasets no se versionan en el repositorio; se descargan de Kaggle a
-\texttt{data/raw/} y el \textit{ingest} mapea columnas por alias, por lo que
-son intercambiables.
+El \textit{ingest} acepta \texttt{.csv}, \texttt{.json} y \texttt{.parquet}
+y mapea columnas por alias, por lo que los datasets son intercambiables.
 
 % ══════════════════════════════════════════════════════════════
 \section{Implementación por Módulo}
@@ -195,13 +356,12 @@ son intercambiables.
 \textbf{Texto}: tokenización $\rightarrow$ minúsculas $\rightarrow$
 \textit{stopwords} (ES+EN) $\rightarrow$ \textit{stemming}
 (\texttt{SnowballStemmer}); el codebook son las $k$ raíces más frecuentes de
-la colección. \textbf{Imagen}: descriptores locales SIFT \cite{b2} y, como
+la colección. \textbf{Imagen}: descriptores locales SIFT y, como
 complemento, un histograma de color HSV de 32 bins (SIFT trabaja en escala de
 grises y en moda el color discrimina). \textbf{Audio}: MFCC por ventana
 deslizante. Para imagen y audio, el codebook se obtiene con
 \texttt{MiniBatchKMeans} sobre todos los descriptores de la colección: los
-$k$ centroides son las \textit{visual words} / \textit{acoustic words}
-\cite{b3}.
+$k$ centroides son las \textit{visual words} / \textit{acoustic words}.
 
 \subsection{Cuantización TF-IDF}
 Cada chunk se representa como un histograma de codewords ponderado con TF
@@ -230,7 +390,7 @@ similitud de forma y de color.
 
 \subsection{Índice invertido con SPIMI}
 El índice invertido mapea cada codeword a sus \textit{postings}
-$(\mathit{chunk}, \mathit{peso})$. Se construye con SPIMI \cite{b1}
+$(\mathit{chunk}, \mathit{peso})$. Se construye con SPIMI
 (Algoritmo~\ref{alg:spimi}), que escala a colecciones que no caben en RAM.
 
 \begin{algorithm}[htbp]
@@ -299,8 +459,8 @@ GROUP BY i.id ORDER BY rank DESC LIMIT %s;
 
 \subsection{Vectores: pgvector con HNSW}
 Los histogramas se consultan por distancia coseno (\texttt{<=>}) y se indexan
-con HNSW \cite{b4}, un índice parcial por modalidad cuya dimensión coincide
-con la $k$ del codebook (texto 1024, imagen 544, audio 128):
+con HNSW, un índice parcial por modalidad cuya dimensión coincide con la $k$
+del codebook (texto 1024, imagen 544, audio 128):
 \begin{lstlisting}[language=SQL]
 CREATE INDEX ON histograms
   USING hnsw ((hist::vector(1024))
@@ -454,50 +614,5 @@ degenera si el vocabulario es menor que $k$.
 (rápido y barato); pgvector+HNSW cuando se quiera delegar la búsqueda
 vectorial a la base de datos; y reservar GIN para búsqueda literal por
 palabras clave, no para similitud.
-
-\subsection*{Reproducibilidad}
-El repositorio incluye Docker Compose (PostgreSQL + pgvector + scripts de
-inicialización), el \textit{ingest} por modalidad y los scripts de benchmark
-que generan las tablas y figuras de este informe. Las instrucciones de
-instalación y uso están en el \texttt{README} y en \texttt{docs/MANUAL.md}.
-
-% ══════════════════════════════════════════════════════════════
-\begin{thebibliography}{00}
-
-\bibitem{b1}
-C. D. Manning, P. Raghavan, and H. Sch\"utze,
-\textit{Introduction to Information Retrieval}.
-Cambridge, U.K.: Cambridge Univ. Press, 2008, cap. 4--6 (SPIMI, TF-IDF,
-similitud coseno).
-
-\bibitem{b2}
-D. G. Lowe,
-``Distinctive image features from scale-invariant keypoints,''
-\textit{Int. J. Computer Vision}, vol. 60, no. 2, pp. 91--110, 2004.
-DOI: \url{https://doi.org/10.1023/B:VISI.0000029664.99615.94}
-
-\bibitem{b3}
-J. Sivic and A. Zisserman,
-``Video Google: A text retrieval approach to object matching in videos,''
-in \textit{Proc. 9th IEEE Int. Conf. Computer Vision (ICCV)},
-Nice, France, 2003, pp. 1470--1477.
-DOI: \url{https://doi.org/10.1109/ICCV.2003.1238663}
-
-\bibitem{b4}
-Y. A. Malkov and D. A. Yashunin,
-``Efficient and robust approximate nearest neighbor search using
-hierarchical navigable small world graphs,''
-\textit{IEEE Trans. Pattern Anal. Mach. Intell.}, vol. 42, no. 4,
-pp. 824--836, 2020.
-DOI: \url{https://doi.org/10.1109/TPAMI.2018.2889473}
-
-\bibitem{b5}
-G. Tzanetakis and P. Cook,
-``Musical genre classification of audio signals,''
-\textit{IEEE Trans. Speech Audio Process.}, vol. 10, no. 5,
-pp. 293--302, 2002.
-DOI: \url{https://doi.org/10.1109/TSA.2002.800560}
-
-\end{thebibliography}
 
 \end{document}
