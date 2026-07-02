@@ -9,7 +9,7 @@ Uso:
     python -m pipelines.ingest --app music --data backend/tests/fixtures/lyrics_sample.json
     python -m pipelines.ingest --app music --data data/raw/spotify-lyrics/lyrics.parquet --limit 1000
     python -m pipelines.ingest --app music --data /data/spotify/lyrics.csv --out /data/index/music_text --k 512
-    python -m pipelines.ingest --app ecommerce --modality image --data data/raw/fashion/images --k 256
+    python -m pipelines.ingest --app ecommerce --modality image --data data/raw/fashion/images --k 512
     python -m pipelines.ingest --app music --modality audio --data data/raw/music/features_30_sec.csv --k 128
     python -m pipelines.ingest --app music --modality audio --data data/raw/music/features_3_sec.csv --k 128
 """
@@ -192,6 +192,10 @@ def ingest_music_audio(
         desc = np.stack(windows, axis=0).astype("float32")  # (n_windows, 40)
         label = rows[0].get("label", "unknown")
         tracks.append({
+            # el filename es el id natural de GTZAN; va tambien como external_id
+            # porque la comparativa pgvector (comparisons/audio.py) busca la
+            # pista sonda por items.external_id.
+            "external_id": str(base_filename),
             "filename": str(base_filename),   # nombre real del .wav en disco
             "label": str(label),
             "n_windows": len(windows),
