@@ -2,10 +2,16 @@
 
 Proyecto 2 — Base de Datos 2 (2026-1). Motor unificado de recuperación que
 funciona sobre **texto, imagen y audio** con la misma arquitectura, y que se
-compara contra las técnicas nativas de PostgreSQL (GIN full-text y pgvector).
+compara contra las técnicas nativas de PostgreSQL (GIN full-text y pgvector
+con HNSW).
 
-**Apps implementadas:** Búsqueda Musical por letra (texto) y Búsqueda Visual
-E-commerce (imagen).
+**Apps implementadas:** Búsqueda Visual E-commerce (imagen), Búsqueda Musical
+por letra y por similitud acústica (texto + audio, con reproducción de pistas)
+y una Consola de consultas multimodal (mini-lenguaje tipo SQL).
+
+El informe técnico completo está en [docs/informe.pdf](docs/informe.pdf)
+(fuente en [docs/informe.tex](docs/informe.tex)) y el manual de usuario en
+[docs/MANUAL.md](docs/MANUAL.md).
 
 ## Arquitectura unificada
 
@@ -16,25 +22,29 @@ solo cambian el extractor y el codebook.
 CONTENIDO → SPLIT (chunks) → EXTRACTOR (features) → CODEBOOK → ÍNDICE INVERTIDO → BÚSQUEDA
 ```
 
-| Etapa | Texto | Imagen |
-|-------|-------|--------|
-| Split | párrafos / estrofas | la imagen completa del producto |
-| Extractor | tokens (nltk) | SIFT (128-d por keypoint) |
-| Codebook | top-k palabras (lingüístico) | K-Means sobre los SIFT (visual words) |
-| Índice | SPIMI → índice invertido | el mismo índice invertido |
-| Búsqueda | coseno sobre histogramas | el mismo coseno |
+| Etapa | Texto | Imagen | Audio |
+|-------|-------|--------|-------|
+| Split | párrafos / estrofas | la imagen del producto | ventanas de 3 s |
+| Extractor | tokens (nltk) | SIFT (128-d) + color HSV | MFCC (40-d) |
+| Codebook | top-k palabras, k=1024 | K-Means, k=512 (visual words) | K-Means, k=128 (acoustic words) |
+| Ponderación | log(1+tf)·idf, normalización L2 | ídem | ídem |
+| Índice | SPIMI → índice invertido | el mismo índice | el mismo índice |
+| Búsqueda | coseno sobre histogramas | el mismo coseno | el mismo coseno |
 
-El núcleo de búsqueda (`search_sparse`) es **idéntico** para ambas modalidades:
-recibe un histograma disperso y no le importa de dónde salió. Eso es lo que hace
-la arquitectura "agnóstica".
+El núcleo de búsqueda (`search_sparse`) es **idéntico** para las tres
+modalidades: recibe un histograma disperso y no le importa de dónde salió. Eso
+es lo que hace la arquitectura "agnóstica".
 
-## Dataset
+## Datasets
 
-- **Música:** *Audio features and lyrics of Spotify songs* (Kaggle,
+- **Música (texto):** *Audio features and lyrics of Spotify songs* (Kaggle,
   `imuhammad/...`) — 18.454 canciones con letra, multilingüe (mayoría inglés,
   algo de español). Se usan `track_name`, `track_artist`, `lyrics`.
 - **Imagen:** *Fashion Product Images (Small)* (Kaggle, `paramaggarwal/...`) —
   ~44.000 imágenes de productos de moda.
+- **Audio:** *GTZAN* (Kaggle, `andradaolteanu/...`) — 1.000 pistas de 30 s en
+  10 géneros. Se usan las ventanas de 3 s con 20 MFCC (`features_3_sec.csv`) y
+  los `.wav` (`genres_original/`) para reproducir las pistas desde la UI.
 
 El ingest acepta `.csv` / `.json` / `.parquet` y mapea columnas por alias, así
 que el dataset es intercambiable.
@@ -53,76 +63,106 @@ kaggle datasets download -d imuhammad/audio-features-and-lyrics-of-spotify-songs
 # Imágenes (versión small, ~592 MB)
 kaggle datasets download -d paramaggarwal/fashion-product-images-small \
   -p data/raw/fashion --unzip
+
+# Audio GTZAN (~1.3 GB: features CSV + wavs)
+kaggle datasets download -d andradaolteanu/gtzan-dataset-music-genre-classification \
+  -p data/raw/music --unzip
 ```
 
-Tras esto debes tener `data/raw/spotify/spotify_songs.csv` y las imágenes en
-`data/raw/fashion/images/`. Sin token de Kaggle puedes bajarlos a mano desde la
-web del dataset y descomprimirlos en esas mismas carpetas. Luego corre el ingest
-(ver más abajo) para construir los índices.
+Tras esto debes tener `data/raw/spotify/spotify_songs.csv`, las imágenes en
+`data/raw/fashion/images/`, y para audio `data/raw/music/features_3_sec.csv` +
+`data/raw/music/genres_original/`. (El zip de GTZAN trae una carpeta `Data/`;
+mueve su contenido directo a `data/raw/music/`.) Sin token de Kaggle puedes
+bajarlos a mano desde la web del dataset y descomprimirlos en esas mismas
+carpetas. Luego corre el ingest (ver más abajo) para construir los índices.
 
 ## Implementación por módulo
 
-- **Split** — [paragraph.py](backend/app/engine/split/paragraph.py): parte el
-  texto en párrafos (robusto a letras vacías/NaN).
+- **Split** — [paragraph.py](backend/app/engine/split/paragraph.py) parte el
+  texto en párrafos (robusto a letras vacías/NaN);
+  [audio_window.py](backend/app/engine/split/audio_window.py) arma las ventanas
+  de 3 s del CSV de GTZAN.
 - **Extractor** — [sift.py](backend/app/engine/extractor/sift.py): SIFT con
-  OpenCV (import perezoso). Para texto el extractor es la tokenización.
+  OpenCV (import perezoso) + [color.py](backend/app/engine/extractor/color.py)
+  (histograma HSV, porque SIFT no ve el color);
+  [mfcc.py](backend/app/engine/extractor/mfcc.py): MFCC desde el CSV o desde un
+  audio subido (librosa). Para texto el extractor es la tokenización.
 - **Codebook** — [linguistic.py](backend/app/engine/codebook/linguistic.py)
   (top-k con tokenizar/stopwords/stemming) y
-  [kmeans.py](backend/app/engine/codebook/kmeans.py) (MiniBatchKMeans → visual
-  words). Ambos producen histogramas L2-normalizados.
+  [kmeans.py](backend/app/engine/codebook/kmeans.py) (MiniBatchKMeans → visual /
+  acoustic words). Ambos ponderan con TF-IDF sublineal (log(1+tf)·idf) y
+  producen histogramas L2-normalizados.
 - **Índice invertido** — [spimi.py](backend/app/engine/index/spimi.py)
   (Single-Pass In-Memory Indexing, obligatorio para texto: vuelca bloques a
   disco y hace k-way merge) + [inverted.py](backend/app/engine/index/inverted.py).
 - **Búsqueda** — [similarity.py](backend/app/engine/search/similarity.py):
   coseno con accumulator (solo toca los chunks que comparten codewords).
+- **Consola multimodal** — [parser.py](backend/app/engine/query/parser.py):
+  parser del mini-lenguaje SQL que enruta a la modalidad correcta.
 - **Persistencia** — [repository.py](backend/app/db/repository.py): vuelca
   codebook, histogramas, metadatos e índice invertido a PostgreSQL.
 - **Comparativas** — [comparisons/](backend/app/comparisons/): la misma consulta
-  por los 3 enfoques (índice propio, GIN, pgvector).
+  por todos los enfoques (índice propio, GIN, pgvector exacto y HNSW).
 
 ## Resultados experimentales
 
 Benchmark de texto sobre datos reales (Spotify), cargas de 1K/5K/10K/18.454
-canciones, 30 consultas cada una. Generado con
+canciones, 30 consultas cada una, codebook k=1024. Generado con
 [experiments/benchmark.py](backend/experiments/benchmark.py).
 
 Resultados con el corpus completo (18.454 canciones):
 
 | Enfoque | Latencia media | p95 | Throughput | Recall@10 vs propio |
 |---------|---------------:|----:|-----------:|--------------------:|
-| Índice invertido (propio) | **12.0 ms** | 15.9 ms | **83 q/s** | 1.00 (ref.) |
-| GIN full-text | 18.6 ms | 24.9 ms | 54 q/s | 0.04 |
-| pgvector coseno | 44.9 ms | 58.2 ms | 22 q/s | 0.97 |
+| Índice invertido (propio) | 4.5 ms | 7.4 ms | 223 q/s | 1.00 (ref.) |
+| GIN full-text | **3.7 ms** | 9.5 ms | **273 q/s** | 0.04 |
+| pgvector coseno (exacto) | 76.1 ms | 88.8 ms | 13 q/s | **1.00** |
 
 ![Latencia vs tamaño](backend/experiments/results/latency_vs_size.png)
 ![Throughput vs tamaño](backend/experiments/results/throughput_vs_size.png)
 ![Recall vs tamaño](backend/experiments/results/recall_vs_size.png)
 ![Memoria de índices nativos](backend/experiments/results/memory_vs_size.png)
 
+### ANN: HNSW vs búsqueda exacta
+
+Con el índice HNSW creado sobre los histogramas (dimensiones acopladas al k de
+cada codebook: texto 1024, imagen 544, audio 128), medimos el trade-off
+recall/latencia barriendo `hnsw.ef_search`. Generado con
+[experiments/ann_benchmark.py](backend/experiments/ann_benchmark.py).
+
+| Método | ef_search | Latencia media | QPS | Recall@10 |
+|--------|----------:|---------------:|----:|----------:|
+| pgvector exacto (Seq Scan) | — | 47.8 ms | 21 | 1.00 |
+| pgvector HNSW | 10 | 1.5 ms | 670 | 0.74 |
+| pgvector HNSW | 160 | 4.0 ms | 249 | 0.96 |
+
+![Recall vs latencia HNSW](backend/experiments/results/ann_recall_vs_latency.png)
+![Latencia vs ef_search](backend/experiments/results/ann_latency_vs_ef.png)
+
 ### Análisis y trade-offs
 
-- **Latencia / throughput:** gana el índice invertido propio en todas las cargas
-  y escala mejor (crece casi lineal; los nativos se separan al subir el tamaño).
-- **Recall:** pgvector recupera casi lo mismo que el motor propio (~0.97), lógico
-  porque ambos hacen coseno sobre los mismos histogramas. GIN recupera un
-  conjunto distinto (recall ~0.04): hace match booleano de términos + `ts_rank`,
-  no similitud de histograma. No es "peor", es otra semántica de búsqueda.
-- **Memoria:** ver gráfico. *Nota:* la tabla `histograms` guarda también los
-  histogramas de las imágenes (e-commerce), así que su tamaño no es solo del
-  texto; tómese como cota superior.
+- **Latencia / throughput:** el índice invertido propio gana hasta ~10K chunks;
+  en el corpus completo GIN lo empata (el vocabulario k=1024 engorda las
+  posting lists propias: 889K postings). HNSW acelera la búsqueda vectorial
+  12–32× frente al escaneo exacto.
+- **Recall:** pgvector recupera **exactamente lo mismo** que el motor propio
+  (recall 1.0 en todos los tamaños; en audio hasta con los mismos scores),
+  lógico porque ambos hacen coseno sobre los mismos histogramas TF-IDF. GIN
+  recupera un conjunto distinto (recall ~0.04): hace match booleano de términos
+  + `ts_rank`, no similitud de histograma. No es "peor", es otra semántica.
+- **Memoria:** GIN se mantiene en ~27 MB; la tabla de histogramas llega a
+  ~400 MB con k=1024. *Nota:* `histograms` guarda las tres modalidades, así que
+  su tamaño es una cota superior para el texto.
 
-**Conclusión:** para búsqueda por similitud, el índice invertido + codebook gana
-en velocidad a costa de la cuantización (pierde matices). pgvector es la
-alternativa nativa más cercana en *resultados*; GIN sirve para full-text clásico.
-
-> **Limitación honesta:** pgvector se midió **sin índice HNSW/IVF** (está
-> comentado en [01_init.sql](db/init/01_init.sql)), por lo que corre como scan
-> lineal — de ahí su latencia alta. Crear el índice ANN lo aceleraría bastante,
-> a cambio de una recall aproximada. Queda como mejora pendiente de la Fase 3.
+**Conclusión:** para búsqueda por similitud, el índice invertido + codebook es
+el motor primario (rápido y compacto); pgvector+HNSW es la vía nativa cuando se
+quiere delegar la búsqueda vectorial a la base (sacrificando algo de recall);
+GIN sirve para full-text clásico por palabras clave.
 
 ## Instalación y uso
 
-Requisitos: Docker. La base trae PostgreSQL + pgvector y los scripts de init.
+Requisitos: Docker. La base trae PostgreSQL + pgvector y los scripts de init
+(schema + índices GIN y HNSW).
 
 ```bash
 docker compose up --build        # db (5432) + backend (8000) + frontend (5173)
@@ -131,46 +171,71 @@ docker compose up --build        # db (5432) + backend (8000) + frontend (5173)
 Cargar datos y persistir en Postgres (dentro del contenedor backend):
 
 ```bash
-# música (texto)
+# música (texto, k=1024)
 docker compose exec backend python -m pipelines.ingest \
   --app music --data /data/raw/spotify/spotify_songs.csv --k 1024 --persist
 
-# e-commerce (imagen)
+# e-commerce (imagen, k=512 + color)
 docker compose exec backend python -m pipelines.ingest \
   --app ecommerce --modality image --data /data/raw/fashion/images --k 512 --persist
+
+# música (audio, k=128)
+docker compose exec backend python -m pipelines.ingest \
+  --app music --modality audio --data /data/raw/music/features_3_sec.csv --k 128 --persist
 ```
 
-- UI: http://localhost:5173 — pestañas para las 2 apps.
-- API docs: http://localhost:8000/docs
-- Comparativa: `GET /compare/text?q=...` devuelve los 3 enfoques con su latencia.
+> Ojo: las dimensiones de los índices HNSW en
+> [01_init.sql](db/init/01_init.sql) están acopladas al `--k` del ingest
+> (texto 1024, imagen 512+32 de color = 544, audio 128). Si cambias un `k`,
+> actualiza el índice correspondiente.
 
-Benchmark de la Fase 4 (genera CSV + gráficos en `experiments/results/`):
+- UI: http://localhost:5173 — pestañas para las apps + consola de consultas.
+- API docs: http://localhost:8000/docs
+- Comparativas en vivo: `GET /compare/text?q=...`,
+  `GET /compare/vector?external_id=...`, `GET /compare/audio?filename=...` —
+  cada una devuelve los enfoques con su latencia.
+
+Benchmarks de la Fase 4 (generan CSV + gráficos en `experiments/results/`):
 
 ```bash
+# comparativa de texto por tamaño de corpus
 docker compose exec backend python -m experiments.benchmark \
-  --data /data/raw/spotify/spotify_songs.csv --sizes 1000 5000 10000
+  --data /data/raw/spotify/spotify_songs.csv --sizes 1000 5000 10000 18454
+
+# HNSW vs búsqueda exacta
+docker compose exec backend python -m experiments.ann_benchmark
 ```
 
 ## Tests
 
 ```bash
-cd backend && pytest          # 16 tests; los de Postgres se saltan si no hay DB
+cd backend && pytest          # 34 tests; los de Postgres se saltan si no hay DB
 ```
+
+Para correr los tests de Postgres sin tocar tus datos, apúntalos a una base
+desechable con `TEST_DATABASE_URL` (los tests hacen reset de su modalidad).
 
 ## Estructura
 
 ```
 backend/
   app/
-    api/          routers: ecommerce, music, compare
-    engine/       arquitectura unificada (split/extractor/codebook/index/search)
-    apps/         orquestadores por app (text_index, visual_index)
+    api/          routers: ecommerce, music, compare, query
+    engine/       arquitectura unificada
+      split/        párrafos / ventanas de audio
+      extractor/    sift, color hsv, mfcc
+      codebook/     lingüístico y k-means (tf-idf sublineal)
+      index/        spimi, índice invertido, histogramas
+      search/       búsqueda coseno compartida
+      query/        parser del mini-lenguaje multimodal
+    apps/         orquestadores por app (text_index, visual_index, acoustic_index)
     db/           sesión, repositorio y adaptadores de persistencia
-    comparisons/  índice propio vs GIN vs pgvector
+    comparisons/  propio vs GIN vs pgvector (text, image, audio, ann)
     core/         config
   pipelines/      ingest offline (+ --persist a Postgres)
-  experiments/    benchmark Fase 4 + resultados
-frontend/         UI React + Vite (demo de las 2 apps)
-db/init/          01_init.sql (extensión vector + schema)
+  experiments/    benchmarks Fase 4 + resultados (CSV y gráficos)
+frontend/         UI React + Vite (pestañas de las apps + consola)
+db/init/          01_init.sql (pgvector + schema + índices GIN/HNSW)
+docs/             informe técnico (tex/pdf) + manual de usuario
 docker-compose.yml
 ```
