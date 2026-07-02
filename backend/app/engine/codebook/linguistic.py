@@ -56,10 +56,11 @@ class LinguisticCodebook(Codebook):
         for tok in tokens(content):  # type: ignore[arg-type]
             j = self.index.get(tok)
             if j is not None:
-                hist[j] += 1.0  # TF
+                hist[j] += 1.0  # TF crudo (conteo)
 
-        # Aplicar peso IDF respectivo
-        hist = hist * self.idf
+        # TF sublineal log(1+tf): que un coro repita 40 veces una palabra no
+        # debe pesar 40 veces mas que decirla una vez. Despues, el peso IDF.
+        hist = np.log1p(hist) * self.idf
 
         norm = np.linalg.norm(hist)
         if norm > 0:

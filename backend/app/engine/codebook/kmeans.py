@@ -86,6 +86,9 @@ class KMeansCodebook(Codebook):
         labels = self._assign(feats)
         counts = np.bincount(labels, minlength=k).astype(np.float32)
         hist[: counts.shape[0]] = counts
+        # TF sublineal log(1+tf): una textura repetitiva no debe dominar el
+        # histograma por pura cantidad de descriptores.
+        hist = np.log1p(hist)
         # TF-IDF: pesa cada visual word por su IDF (si el codebook lo trae).
         if self.idf.size == k:
             hist = hist * self.idf
