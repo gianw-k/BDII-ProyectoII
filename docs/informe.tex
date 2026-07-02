@@ -2,300 +2,334 @@
 %  Informe tecnico - Proyecto 2: Sistema Multimodal de Recuperacion y Busqueda
 %  CS2042 Bases de Datos II - UTEC - Ciclo 2026-1
 %
-%  Compilar con:  pdflatex informe.tex   (dos veces, para el indice y refs)
-%  Las figuras salen de ../backend/experiments/results/ (generadas por los
-%  scripts de benchmark). Si compilas desde otra carpeta, ajusta \graphicspath.
+%  Formato: IEEE conference (IEEEtran).
+%  Compilar: pdflatex informe.tex  (dos veces, para refs y numeracion)
+%  Las figuras salen de ../backend/experiments/results/ (los benchmarks las
+%  generan). Si compilas desde otra carpeta (p.ej. Overleaf), sube los PNG
+%  y ajusta \graphicspath.
 % ============================================================================
-\documentclass[11pt,a4paper]{article}
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
 
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
-% es-noshorthands: desactiva los atajos de babel ("<", ">", comillas) que
-% chocan con el codigo y con operadores como <=> de pgvector.
+% es-noshorthands: evita que babel se pelee con los simbolos de los listados
 \usepackage[spanish,es-noshorthands]{babel}
-\usepackage{lmodern}
-\usepackage{graphicx}
+\usepackage{url}
 \usepackage{booktabs}
-\usepackage{array}
-\usepackage{amsmath}
 \usepackage{listings}
-\usepackage{xcolor}
-\usepackage{geometry}
-\usepackage{caption}
-\usepackage[hidelinks]{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
 
-\geometry{margin=2.5cm}
 \graphicspath{{../backend/experiments/results/}}
 
-% Estilo sobrio para los bloques de codigo/SQL.
 \definecolor{codegray}{gray}{0.95}
 \lstset{
-  basicstyle=\ttfamily\small,
+  basicstyle=\ttfamily\scriptsize,
   backgroundcolor=\color{codegray},
   breaklines=true,
   frame=single,
-  framesep=4pt,
+  framesep=3pt,
   columns=fullflexible,
   keepspaces=true,
   showstringspaces=false,
 }
 
-\title{\textbf{Sistema Multimodal de Recuperación y Búsqueda}\\[2pt]
-\large Informe técnico --- Proyecto 2}
-\author{Curso: Base de Datos II (CS2042) --- UTEC --- Ciclo 2026-1}
-\date{\today}
-
 \begin{document}
+
+% ══════════════════════════════════════════════════════════════
+\title{Sistema Multimodal de Recuperación y Búsqueda:\\
+Índice Invertido con Codebook frente a las Técnicas Nativas de PostgreSQL}
+
+% Si hay mas integrantes, agregarlos aqui separados por coma
+\author{
+\IEEEauthorblockN{Jyns Arturo Ordóñez Del Carpio, Denzel Bautista, Gian Aedo}
+\IEEEauthorblockA{
+  \textit{Curso: Base de Datos II (CS2042)}\\
+  \textit{Universidad de Ingeniería y Tecnología (UTEC)}\\
+  Lima, Perú}
+}
+
 \maketitle
 
+% ══════════════════════════════════════════════════════════════
 \begin{abstract}
-\noindent
-Implementamos un motor de recuperación por similitud que aplica \emph{la misma}
-arquitectura --- \textit{split} $\rightarrow$ extractor $\rightarrow$ codebook
-$\rightarrow$ índice invertido $\rightarrow$ búsqueda por coseno --- a tres
-modalidades: texto (letras de canciones), imagen (productos de moda) y audio
-(pistas musicales). Sobre él construimos dos aplicaciones y lo comparamos contra
-las técnicas nativas de PostgreSQL: \texttt{GIN} full-text para texto y
-\texttt{pgvector} (con índice \texttt{HNSW}) para vectores. El informe describe
-la arquitectura, los datasets, la implementación por módulo y una evaluación
-experimental de latencia, throughput, \textit{recall} y memoria que cuantifica
-los \textit{trade-offs} entre nuestro índice invertido y los índices nativos.
+Presentamos un motor de recuperación por similitud que aplica una única
+arquitectura --- \textit{split} $\rightarrow$ extractor $\rightarrow$
+\textit{codebook} $\rightarrow$ índice invertido $\rightarrow$ búsqueda por
+coseno --- a tres modalidades de contenido: texto (18\,454 letras de
+canciones), imagen (44\,326 productos de moda) y audio (1\,000 pistas de
+GTZAN). Cada modalidad solo cambia el extractor de características (tokens
+lingüísticos, SIFT \cite{b2} o MFCC) y la construcción del diccionario
+(top-$k$ de palabras o K-Means, siguiendo el esquema \textit{Bag of Visual
+Words} \cite{b3}); el índice invertido se construye con SPIMI \cite{b1} y los
+histogramas se ponderan con TF-IDF sublineal. Sobre el motor se implementan
+tres aplicaciones (búsqueda visual e-commerce, búsqueda musical por letra y
+por similitud acústica, y una consola de consultas multimodal) y se compara
+contra las técnicas nativas de PostgreSQL: \texttt{GIN} full-text para texto y
+\texttt{pgvector} con índice HNSW \cite{b4} para vectores. Los experimentos
+muestran que el índice propio y \texttt{pgvector} recuperan exactamente los
+mismos resultados (recall $=1.0$), que el índice propio domina la latencia
+hasta corpus medianos, y que HNSW acelera la búsqueda vectorial
+12--32$\times$ con recall de hasta $0.96$.
 \end{abstract}
 
-\tableofcontents
+\begin{IEEEkeywords}
+Índice invertido, SPIMI, TF-IDF, Bag of Visual Words, SIFT, MFCC, K-Means,
+similitud coseno, PostgreSQL, GIN, pgvector, HNSW, búsqueda aproximada.
+\end{IEEEkeywords}
 
-% ---------------------------------------------------------------------------
-\section{Descripción del sistema y arquitectura}
+% ══════════════════════════════════════════════════════════════
+\section{Introducción}
 
-El objetivo del proyecto es demostrar que distintos tipos de contenido pueden
-indexarse y recuperarse con \emph{un mismo paradigma}. En lugar de un motor por
-modalidad, tenemos un solo pipeline y cada modalidad solo cambia dos piezas: el
-\textbf{extractor} de características y el \textbf{codebook}. Todo lo demás
---- índice invertido, búsqueda por coseno, persistencia --- se reutiliza tal
-cual.
+Las bases de datos modernas deben indexar contenido no estructurado ---
+texto, imágenes, audio --- y responder consultas por \emph{similitud}, no por
+igualdad exacta. Este proyecto demuestra que los tres tipos de contenido
+pueden indexarse y recuperarse con \emph{el mismo paradigma}: dividir el
+contenido en unidades atómicas (\textit{chunks}), extraer descriptores
+propios de cada modalidad, cuantizarlos contra un diccionario compartido
+(\textit{codebook}) y publicar el resultado en un índice invertido consultado
+por similitud coseno.
 
-\begin{center}
-\fbox{\texttt{CONTENIDO $\rightarrow$ SPLIT $\rightarrow$ EXTRACTOR
-$\rightarrow$ CODEBOOK $\rightarrow$ ÍNDICE INVERTIDO $\rightarrow$ BÚSQUEDA}}
-\end{center}
+Los objetivos son: (1) implementar la arquitectura unificada de punta a punta;
+(2) persistirla en PostgreSQL; (3) compararla contra los índices nativos del
+motor (GIN/GiST para texto, \texttt{pgvector} para vectores); y (4) evaluar
+experimentalmente latencia, throughput, \textit{recall} y memoria para
+cuantificar los \textit{trade-offs}.
 
-\begin{table}[h]
+\subsection{Aplicaciones implementadas}
+El backend soporta tres aplicaciones (el enunciado exige al menos dos):
+\begin{enumerate}
+  \item \textbf{Búsqueda visual e-commerce}: el usuario sube una foto y
+        recibe los productos más similares.
+  \item \textbf{Búsqueda musical}: por letra (full-text) y por similitud
+        acústica (subiendo un audio o eligiendo una pista).
+  \item \textbf{Consola de consultas multimodal}: un mini-lenguaje tipo SQL
+        que unifica las búsquedas de las tres modalidades.
+\end{enumerate}
+
+% ══════════════════════════════════════════════════════════════
+\section{Arquitectura del Sistema}
+
+La Fig.~\ref{fig:pipeline} muestra el pipeline común. La
+Tabla~\ref{tab:etapas} resume cómo se adapta cada etapa a cada modalidad: el
+motor de búsqueda (\texttt{search\_sparse}) es idéntico para las tres.
+
+\begin{figure}[htbp]
 \centering
-\caption{Adaptación de cada etapa a las tres modalidades.}
-\begin{tabular}{@{}p{2.4cm}p{3.5cm}p{3.5cm}p{3.5cm}@{}}
+\begin{tikzpicture}[
+  font=\scriptsize, node distance=0.35cm,
+  stage/.style={draw, rounded corners=2pt, fill=blue!8,
+                text centered, minimum width=4.6cm, minimum height=0.5cm},
+  io/.style={draw, trapezium, trapezium left angle=70,
+             trapezium right angle=110, fill=orange!15,
+             text centered, minimum width=3.6cm, minimum height=0.5cm},
+  arr/.style={-Stealth, thick}
+]
+\node[io] (in) {Contenido (texto / imagen / audio)};
+\node[stage, below=of in]  (sp) {Split: chunks (párrafos / ventanas)};
+\node[stage, below=of sp]  (ex) {Extractor: tokens / SIFT / MFCC};
+\node[stage, below=of ex]  (cb) {Codebook: top-$k$ / K-Means ($k$ codewords)};
+\node[stage, below=of cb]  (hi) {Histograma TF-IDF $L_2$-normalizado};
+\node[stage, below=of hi]  (ix) {Índice invertido (SPIMI)};
+\node[stage, below=of ix]  (se) {Búsqueda coseno (accumulator)};
+\node[io, below=of se] (out) {Top-$N$ resultados con puntaje};
+
+\draw[arr] (in)--(sp); \draw[arr] (sp)--(ex); \draw[arr] (ex)--(cb);
+\draw[arr] (cb)--(hi); \draw[arr] (hi)--(ix); \draw[arr] (ix)--(se);
+\draw[arr] (se)--(out);
+\end{tikzpicture}
+\caption{Pipeline unificado: solo el extractor y el codebook dependen de la
+modalidad; el índice y la búsqueda se comparten.}
+\label{fig:pipeline}
+\end{figure}
+
+\begin{table}[htbp]
+\caption{Adaptación de cada etapa por modalidad}
+\label{tab:etapas}
+\centering
+\scriptsize
+\begin{tabular}{@{}llll@{}}
 \toprule
 \textbf{Etapa} & \textbf{Texto} & \textbf{Imagen} & \textbf{Audio} \\
 \midrule
-Split      & párrafos / estrofas & imagen del producto & ventanas de 3\,s \\
-Extractor  & tokens (nltk) & SIFT (128-d) & MFCC (40-d) \\
-Codebook   & top-$k$ palabras ($k{=}1024$) & K-Means ($k{=}512$) & K-Means ($k{=}128$) \\
-Ponderación& $\log(1{+}\mathrm{tf})\cdot\mathrm{idf}$ & ídem (visual words) & ídem (acoustic words) \\
-Índice     & SPIMI $\rightarrow$ invertido & el mismo índice & el mismo índice \\
-Búsqueda   & coseno & el mismo coseno & el mismo coseno \\
+Split      & estrofas & imagen del producto & ventanas de 3\,s \\
+Extractor  & tokens (nltk) & SIFT 128-d \cite{b2} & MFCC 40-d \\
+Codebook   & top-$k$, $k{=}1024$ & K-Means, $k{=}512$ & K-Means, $k{=}128$ \\
+Ponderación& \multicolumn{3}{c}{$\log(1{+}\mathrm{tf})\cdot\mathrm{idf}$, normalización $L_2$} \\
+Índice     & \multicolumn{3}{c}{SPIMI $\rightarrow$ índice invertido (compartido)} \\
+Búsqueda   & \multicolumn{3}{c}{coseno por acumuladores (compartida)} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-El corazón de la búsqueda es \texttt{search\_sparse}: recibe el histograma
-disperso de una consulta y acumula el puntaje coseno recorriendo únicamente los
-\textit{chunks} que comparten alguna \textit{codeword} con la consulta
-(\textit{accumulator pattern}). No le importa la modalidad de origen, y esa es
-justamente la razón de que la arquitectura sea agnóstica.
-
-\paragraph{Aplicaciones implementadas.} El backend soporta tres de las ideas
-sugeridas (el enunciado pide al menos dos):
-\begin{enumerate}
-  \item \textbf{Búsqueda Visual E-commerce} (imagen): el usuario sube una foto y
-        obtiene los productos más similares.
-  \item \textbf{Búsqueda Musical} (texto + audio): buscar canciones por letra
-        (full-text) o por similitud acústica.
-  \item \textbf{Consola SQL multimodal}: un mini-lenguaje que unifica las
-        búsquedas de las tres modalidades desde una sola interfaz.
-\end{enumerate}
-
-% ---------------------------------------------------------------------------
-\section{Dataset utilizado y características}
+% ══════════════════════════════════════════════════════════════
+\section{Datasets}
 
 \begin{itemize}
-  \item \textbf{Música (texto + audio).} \textit{Audio features and lyrics of
-        Spotify songs} (Kaggle) para las letras: \textbf{18\,454} canciones con
-        letra, multilingüe (mayoría inglés, algo de español). Para audio,
-        \textit{GTZAN} con \texttt{features\_3\_sec.csv}: cada pista se parte en
-        ventanas de 3\,s y se describe con 20 MFCC (media + varianza $= 40$
-        características por ventana).
-  \item \textbf{Imagen.} \textit{Fashion Product Images (Small)} (Kaggle):
-        \textbf{44\,326} imágenes de productos de moda. Cada producto aporta un
-        conjunto de descriptores SIFT que se resumen en un histograma
-        Bag-of-Visual-Words.
+  \item \textbf{Texto:} \textit{Audio features and lyrics of Spotify songs}
+        (Kaggle): 18\,454 canciones con letra, multilingüe.
+  \item \textbf{Imagen:} \textit{Fashion Product Images (Small)} (Kaggle):
+        44\,326 fotos de productos de moda ($\sim$965\,000 descriptores SIFT
+        en total).
+  \item \textbf{Audio:} \textit{GTZAN} \cite{b5}: 1\,000 pistas de 30\,s en
+        10 géneros; se usan las ventanas de 3\,s con 20 MFCC (media +
+        varianza $=40$ características por ventana).
 \end{itemize}
 
-Los datasets no se versionan en el repositorio (son pesados; van en
-\texttt{.gitignore}) y se descargan de Kaggle a \texttt{data/raw/}. El
-\textit{ingest} acepta \texttt{.csv}, \texttt{.json} y \texttt{.parquet} y mapea
-columnas por alias, de modo que el dataset es intercambiable.
+Los datasets no se versionan en el repositorio; se descargan de Kaggle a
+\texttt{data/raw/} y el \textit{ingest} mapea columnas por alias, por lo que
+son intercambiables.
 
-\paragraph{Requisitos.} \textit{Funcionales}: búsqueda por letra, por imagen y
-por similitud acústica; retorno de top-$N$ con puntaje. \textit{No funcionales}:
-latencia interactiva (decenas de ms), bajo consumo de memoria del índice propio
-y persistencia en PostgreSQL.
+% ══════════════════════════════════════════════════════════════
+\section{Implementación por Módulo}
 
-% ---------------------------------------------------------------------------
-\section{Detalles de implementación por módulo}
+\subsection{Extractores y codebook}
+\textbf{Texto}: tokenización $\rightarrow$ minúsculas $\rightarrow$
+\textit{stopwords} (ES+EN) $\rightarrow$ \textit{stemming}
+(\texttt{SnowballStemmer}); el codebook son las $k$ raíces más frecuentes de
+la colección. \textbf{Imagen}: descriptores locales SIFT \cite{b2} y, como
+complemento, un histograma de color HSV de 32 bins (SIFT trabaja en escala de
+grises y en moda el color discrimina). \textbf{Audio}: MFCC por ventana
+deslizante. Para imagen y audio, el codebook se obtiene con
+\texttt{MiniBatchKMeans} sobre todos los descriptores de la colección: los
+$k$ centroides son las \textit{visual words} / \textit{acoustic words}
+\cite{b3}.
 
-\subsection{Split}
-\begin{itemize}
-  \item \textbf{Texto} (\texttt{split/paragraph.py}): separa por dobles saltos
-        de línea (una estrofa = un \textit{chunk}); si no hay, cae a un chunk
-        único.
-  \item \textbf{Imagen}: cada producto es un objeto; los ``chunks'' son sus
-        descriptores locales SIFT.
-  \item \textbf{Audio} (\texttt{split/audio\_window.py}): ventanas deslizantes
-        de 3\,s tomadas directamente de las filas del CSV de GTZAN.
-\end{itemize}
-
-\subsection{Extractor}
-\begin{itemize}
-  \item \textbf{Texto} (\texttt{codebook/text\_norm.py}): tokenización con
-        expresión regular $\rightarrow$ minúsculas $\rightarrow$ eliminación de
-        \textit{stopwords} (español + inglés, vía nltk) $\rightarrow$
-        \textit{stemming} con \texttt{SnowballStemmer}. Es la única puerta de
-        entrada del texto: tanto el ingest como las consultas pasan por
-        \texttt{tokens()}.
-  \item \textbf{Imagen} (\texttt{extractor/sift.py}): SIFT de OpenCV,
-        descriptores de 128 dimensiones por \textit{keypoint}; la imagen se
-        estandariza de tamaño para igualar la escala. Adicionalmente
-        (\texttt{extractor/color.py}) se extrae un histograma de color HSV de 32
-        \textit{bins} (16 tono + 8 saturación + 8 valor), ignorando el fondo
-        casi blanco del dataset.
-  \item \textbf{Audio} (\texttt{extractor/mfcc.py}): 20 coeficientes MFCC;
-        acepta tanto el vector ya calculado del CSV como audio crudo procesado
-        con \texttt{librosa}.
-\end{itemize}
-
-\subsection{Codebook}
-\begin{itemize}
-  \item \textbf{Texto} (\texttt{codebook/linguistic.py}): las $k$ palabras
-        (stems) más frecuentes de toda la colección conforman el diccionario.
-  \item \textbf{Imagen y audio} (\texttt{codebook/kmeans.py}):
-        \texttt{MiniBatchKMeans} sobre todos los descriptores de la colección;
-        los $k$ centroides son las ``palabras visuales'' / ``acústicas''.
-\end{itemize}
-
-En las tres modalidades el histograma se pondera con \textbf{TF-IDF} --- usando
-TF sublineal $\log(1+\mathrm{tf})$ --- y luego se normaliza en $L_2$. El TF
-sublineal evita que una \textit{codeword} muy repetida (el coro de una canción,
-una textura repetitiva) domine el histograma por pura cantidad; el IDF penaliza
-las que aparecen en casi todos los ítems (poco discriminativas):
+\subsection{Cuantización TF-IDF}
+Cada chunk se representa como un histograma de codewords ponderado con TF
+sublineal e IDF, y normalizado en $L_2$:
 \begin{equation}
-  w_{i} = \log\!\big(1+\mathrm{tf}_{i}\big)\cdot \mathrm{idf}_{i},
-  \qquad
-  \mathrm{idf}_{i} = \log_{10}\!\frac{N}{\mathrm{df}_{i}},
+  w_{i} = \log\!\big(1+\mathrm{tf}_{i}\big)\cdot
+          \log_{10}\!\frac{N}{\mathrm{df}_{i}},
 \end{equation}
 donde $N$ es el número de ítems y $\mathrm{df}_i$ en cuántos aparece la
-\textit{codeword} $i$. Con la normalización $L_2$, la similitud coseno entre dos
-histogramas se reduce a su producto punto.
+codeword $i$. El TF sublineal evita que una codeword muy repetida (el coro de
+una canción, una textura repetitiva) domine el histograma; el IDF penaliza
+las poco discriminativas. Con la normalización $L_2$, el coseno entre dos
+histogramas se reduce a un producto punto.
 
-\paragraph{Tamaño del codebook ($k$).} Es la perilla central del \textit{trade-off}
-calidad/costo: con $k$ chico la cuantización confunde contenidos distintos
-(falsos positivos); con $k$ grande el vocabulario discrimina más, a costa de
-memoria e indexación. Usamos $k=1024$ palabras para texto (18\,454 canciones),
-$k=512$ \textit{visual words} para imagen ($\sim$965\,000 descriptores SIFT) y
-$k=128$ \textit{acoustic words} para audio, respetando el tope de 2\,000
-dimensiones que indexa el HNSW de pgvector.
+El tamaño $k$ del codebook es la perilla central del \textit{trade-off}
+calidad/costo: con $k$ chico la cuantización confunde contenidos distintos;
+con $k$ grande discrimina más, a costa de \textit{posting lists} más largas.
+Usamos $k{=}1024$ (texto), $k{=}512{+}32$ (imagen con color) y $k{=}128$
+(audio), respetando el tope de 2\,000 dimensiones del HNSW de pgvector.
 
-\paragraph{Fusión de color (imagen).} El histograma final de un producto
-concatena la parte visual (SIFT) y la de color, ponderadas de modo que el
-vector siga siendo unitario:
-\[
-  h = \big[\,\sqrt{1-\alpha}\;\text{BoVW}\;\big\Vert\;\sqrt{\alpha}\;\text{color}\,\big],
-\]
-con lo que el coseno resulta un promedio ponderado entre similitud de forma
-(SIFT) y de color, controlado por $\alpha$.
+En imagen, el histograma final concatena la parte visual y la de color
+manteniendo la norma unitaria:
+$h = [\sqrt{1-\alpha}\,\mathrm{BoVW} \,\Vert\, \sqrt{\alpha}\,\mathrm{color}]$,
+con lo que el coseno queda como promedio ponderado por $\alpha$ entre
+similitud de forma y de color.
 
-\subsection{Índice invertido (SPIMI)}
-El índice invertido mapea cada \textit{codeword} a la lista de \textit{chunks}
-que la contienen, con su peso. Para texto se construye con \textbf{SPIMI}
-(\textit{Single-Pass In-Memory Indexing}, \texttt{index/spimi.py}):
+\subsection{Índice invertido con SPIMI}
+El índice invertido mapea cada codeword a sus \textit{postings}
+$(\mathit{chunk}, \mathit{peso})$. Se construye con SPIMI \cite{b1}
+(Algoritmo~\ref{alg:spimi}), que escala a colecciones que no caben en RAM.
 
-\begin{enumerate}
-  \item Recorre los \textit{chunks} en una sola pasada acumulando \textit{postings}
-        en memoria.
-  \item Cuando el bloque llena \texttt{block\_size}, lo vuelca a disco
-        \emph{ordenado por} \texttt{word\_idx} y libera memoria.
-  \item Al final hace un \textit{k-way merge} de los bloques
-        (\texttt{heapq.merge}) para producir el índice final.
-\end{enumerate}
+\begin{algorithm}[htbp]
+\caption{SPIMI: construcción del índice invertido}
+\label{alg:spimi}
+\begin{algorithmic}[1]
+\STATE \textbf{Entrada:} stream de $(\mathit{chunk}, \mathit{hist\ disperso})$
+\STATE \textbf{Salida:} índice invertido en disco
+\STATE $B \gets \{\}$ \COMMENT{bloque en memoria}
+\FORALL{$(c, h)$ en el stream}
+  \FORALL{$(w, \mathit{peso})$ en $h$}
+    \STATE agregar $(c, \mathit{peso})$ a $B[w]$
+  \ENDFOR
+  \IF{$|B| \ge \mathit{block\_size}$}
+    \STATE volcar $B$ a disco \emph{ordenado por} $w$; $B \gets \{\}$
+  \ENDIF
+\ENDFOR
+\STATE volcar el bloque final
+\RETURN \textit{k-way merge} de los bloques (heap por $w$)
+\end{algorithmic}
+\end{algorithm}
 
-Este diseño escala a colecciones que no caben en RAM (ajustando
-\texttt{block\_size}). El mismo indexador se usa para imagen y audio, ya que a
-esa altura del pipeline todo son histogramas dispersos.
+\subsection{Búsqueda por coseno (accumulator)}
+La búsqueda (Algoritmo~\ref{alg:cosine}) solo visita los chunks que comparten
+alguna codeword con la consulta, que es lo que hace eficiente al índice
+invertido frente a un escaneo denso. Es idéntica para las tres modalidades.
 
-\subsection{Búsqueda por coseno}
-\texttt{search\_sparse} (\texttt{search/similarity.py}) implementa el
-\textit{CosineScore} con acumuladores:
-\[
-  \mathrm{score}(c) = \sum_{i \in q\cap c} q_i\, d_{c,i},
-  \qquad
-  \cos(q,c) = \frac{\mathrm{score}(c)}{\lVert q\rVert\,\lVert d_c\rVert}.
-\]
-Solo se tocan los documentos que comparten alguna \textit{codeword} con la
-consulta, que es lo que hace eficiente al índice invertido frente a un
-\textit{scan} denso.
+\begin{algorithm}[htbp]
+\caption{CosineScore sobre el índice invertido}
+\label{alg:cosine}
+\begin{algorithmic}[1]
+\STATE \textbf{Entrada:} histograma disperso $q$ de la consulta, top-$N$
+\STATE $S \gets$ mapa de acumuladores en 0
+\FORALL{$(w, q_w)$ en $q$}
+  \FORALL{$(c, d_w)$ en $\mathit{postings}(w)$}
+    \STATE $S[c] \gets S[c] + q_w \cdot d_w$
+  \ENDFOR
+\ENDFOR
+\FORALL{$c$ en $S$}
+  \STATE $S[c] \gets S[c] \,/\, (\lVert q\rVert \cdot \lVert d_c\rVert)$
+\ENDFOR
+\RETURN los $N$ chunks de mayor $S[c]$
+\end{algorithmic}
+\end{algorithm}
 
-\subsection{Persistencia}
-Todo se guarda en PostgreSQL (\texttt{db/init/01\_init.sql}): tablas
-\texttt{items}, \texttt{chunks}, \texttt{codebook} (centroides como
-\texttt{vector} de pgvector), \texttt{histograms} (histograma normalizado por
-chunk) e \texttt{inverted\_index} (\textit{postings}). El esquema se inicializa
-automáticamente al crear el volumen de Docker.
+\subsection{Persistencia en PostgreSQL}
+El esquema (\texttt{db/init/01\_init.sql}) guarda \texttt{items},
+\texttt{chunks}, \texttt{codebook} (centroides como \texttt{vector} de
+pgvector), \texttt{histograms} (histograma por chunk) e
+\texttt{inverted\_index} (postings). Se inicializa automáticamente con Docker
+Compose.
 
-% ---------------------------------------------------------------------------
-\section{Comparativas nativas en PostgreSQL (Fase 3)}
+% ══════════════════════════════════════════════════════════════
+\section{Comparativas Nativas en PostgreSQL}
 
 \subsection{Texto: GIN full-text}
-Cada \textit{chunk} de letra lleva una columna \texttt{tsvector} indexada con
-\texttt{GIN}. La consulta nativa usa \texttt{plainto\_tsquery} y ordena por
-\texttt{ts\_rank}:
+Cada chunk lleva un \texttt{tsvector} indexado con GIN; la consulta nativa
+usa \texttt{plainto\_tsquery} y rankea con \texttt{ts\_rank}:
 \begin{lstlisting}[language=SQL]
-SELECT i.id, max(ts_rank(c.tsv, query)) AS rank
-FROM chunks c JOIN items i ON i.id = c.item_id,
-     plainto_tsquery('spanish', %s) AS query
-WHERE c.modality = 'text' AND c.tsv @@ query
+SELECT i.id, max(ts_rank(c.tsv, q)) AS rank
+FROM chunks c JOIN items i ON i.id=c.item_id,
+     plainto_tsquery('spanish', %s) AS q
+WHERE c.modality='text' AND c.tsv @@ q
 GROUP BY i.id ORDER BY rank DESC LIMIT %s;
 \end{lstlisting}
 
-\subsection{Imagen/Audio: pgvector + HNSW}
-Los histogramas se almacenan como \texttt{vector} y se consultan por distancia
-coseno (\texttt{<=>}). Sobre ellos se crea un índice \textbf{HNSW} por modalidad:
+\subsection{Vectores: pgvector con HNSW}
+Los histogramas se consultan por distancia coseno (\texttt{<=>}) y se indexan
+con HNSW \cite{b4}, un índice parcial por modalidad cuya dimensión coincide
+con la $k$ del codebook (texto 1024, imagen 544, audio 128):
 \begin{lstlisting}[language=SQL]
 CREATE INDEX ON histograms
-  USING hnsw ((hist::vector(1024)) vector_cosine_ops)
-  WITH (m = 16, ef_construction = 64)
-  WHERE modality = 'text';
+  USING hnsw ((hist::vector(1024))
+              vector_cosine_ops)
+  WITH (m=16, ef_construction=64)
+  WHERE modality='text';
 \end{lstlisting}
-El índice fija la dimensión por modalidad (texto 1024, imagen 544 = 512 SIFT
-$+$ 32 color, audio 128), que es exactamente la que produce el codebook con la
-configuración de \textit{ingest} de producción: la dimensión y la $k$ del
-codebook están acopladas, de modo que cambiar una implica reindexar.
+Sin el índice, pgvector ejecuta un \textit{Seq Scan} (búsqueda exacta); con
+él, búsqueda aproximada cuya voracidad controla \texttt{hnsw.ef\_search}.
 
-% ---------------------------------------------------------------------------
-\section{Resultados experimentales (Fase 4)}
+% ══════════════════════════════════════════════════════════════
+\section{Evaluación Experimental}
 
-\subsection{Texto: índice invertido vs.\ GIN vs.\ pgvector}
-Corrimos la misma batería de consultas sobre corpus de 1K, 5K, 10K y 18\,454
-chunks. El \textit{recall@k} se mide tomando como referencia el ranking coseno
-del índice propio.
+\subsection{Texto: propio vs.\ GIN vs.\ pgvector}
+Se corrió la misma batería de 30 consultas sobre corpus de 1K, 5K, 10K y
+18\,454 chunks (Tabla~\ref{tab:texto}); el recall@10 toma como referencia el
+ranking coseno del índice propio. Las Figs.~\ref{fig:latencia} y
+\ref{fig:memoria} muestran latencia y memoria según el tamaño.
 
-\begin{table}[h]
+\begin{table}[htbp]
+\caption{Comparativa de texto por tamaño de corpus ($k{=}1024$)}
+\label{tab:texto}
 \centering
-\caption{Comparativa de texto por tamaño de corpus (codebook $k{=}1024$ con
-TF-IDF sublineal; latencia media, throughput y recall@10 tomando como
-referencia el ranking del índice propio).}
-\small
+\scriptsize
 \begin{tabular}{@{}rlrrrr@{}}
 \toprule
-\textbf{Corpus} & \textbf{Método} & \textbf{Media (ms)} & \textbf{p95 (ms)} &
-\textbf{QPS} & \textbf{Recall@k} \\
+\textbf{Corpus} & \textbf{Método} & \textbf{Media} & \textbf{p95} &
+\textbf{QPS} & \textbf{R@10} \\
+ & & (ms) & (ms) & & \\
 \midrule
 1\,000  & índice invertido & 0.44  & 0.71  & 2284 & 1.00 \\
         & GIN full-text    & 1.45  & 1.97  & 688  & 0.07 \\
@@ -316,159 +350,154 @@ referencia el ranking del índice propio).}
 \end{tabular}
 \end{table}
 
-\begin{figure}[h]
+\begin{figure}[htbp]
 \centering
-\includegraphics[width=0.48\textwidth]{latency_vs_size.png}\hfill
-\includegraphics[width=0.48\textwidth]{throughput_vs_size.png}
-\caption{Latencia (izq.) y throughput (der.) según el tamaño del corpus.}
+\includegraphics[width=\columnwidth]{latency_vs_size.png}
+\caption{Latencia media según el tamaño del corpus (texto).}
+\label{fig:latencia}
 \end{figure}
 
-\begin{figure}[h]
+\begin{figure}[htbp]
 \centering
-\includegraphics[width=0.48\textwidth]{recall_vs_size.png}\hfill
-\includegraphics[width=0.48\textwidth]{memory_vs_size.png}
-\caption{Recall@k (izq.) y memoria del índice nativo (der.).}
+\includegraphics[width=\columnwidth]{memory_vs_size.png}
+\caption{Memoria en disco de los índices nativos.}
+\label{fig:memoria}
 \end{figure}
 
-\paragraph{Lectura.} El índice invertido propio domina la latencia hasta
-$\sim$10K chunks; en el corpus completo \texttt{GIN} lo empata (3.7 vs
-4.5\,ms), porque el vocabulario de $k{=}1024$ engorda las \textit{posting
-lists} propias (889\,366 postings en 18\,454 chunks). \texttt{pgvector}
-recupera \emph{exactamente} lo mismo que el motor propio (recall $= 1.0$ en
-todos los tamaños: ambos rankean por coseno sobre el mismo histograma TF-IDF),
-pero paga la distancia densa de 1\,024 dimensiones ($76$\,ms y $\sim$400\,MB
-de tabla de histogramas en el corpus completo, frente a $\sim$27\,MB del GIN).
-El \textit{recall} de \texttt{GIN} frente al coseno es bajo y \emph{cae} al
-crecer el corpus (0.07 $\rightarrow$ 0.04): la coincidencia booleana de
-\textit{tokens} recupera un conjunto distinto al del ranking por similitud ---
-son semánticas de consulta diferentes, no un ``peor buscador''.
+\textbf{Lectura.} El índice propio domina la latencia hasta $\sim$10K chunks;
+en el corpus completo GIN lo empata (3.7 vs.\ 4.5\,ms) porque el vocabulario
+de $k{=}1024$ engorda las posting lists propias (889\,366 postings).
+\texttt{pgvector} recupera \emph{exactamente} lo mismo que el motor propio
+(recall $=1.0$ en todos los tamaños: ambos rankean por coseno sobre el mismo
+histograma TF-IDF), pero paga la distancia densa de 1\,024 dimensiones
+(76\,ms y $\sim$400\,MB de histogramas frente a $\sim$27\,MB del GIN). El
+recall de GIN frente al coseno es bajo y cae al crecer el corpus
+($0.07 \rightarrow 0.04$): la coincidencia booleana de tokens responde una
+pregunta distinta a la del ranking por similitud.
 
-\subsection{ANN: HNSW vs.\ búsqueda exacta (pgvector)}
-Aquí las dos vías corren la misma consulta coseno; lo único que cambia es si el
-planner usa el índice HNSW o cae a \textit{Seq Scan} (exacto). El
-\textit{recall} del aproximado se mide contra el exacto.
+\subsection{ANN: HNSW vs.\ búsqueda exacta}
+Ambas vías ejecutan la misma consulta coseno; solo cambia si el planner usa
+el índice HNSW o cae a Seq Scan. El recall del aproximado se mide contra el
+exacto (Tabla~\ref{tab:ann}, Fig.~\ref{fig:ann}).
 
-\begin{table}[h]
+\begin{table}[htbp]
+\caption{HNSW vs.\ exacto (histogramas de texto, 1\,024 dims)}
+\label{tab:ann}
 \centering
-\caption{HNSW frente a búsqueda exacta, variando \texttt{ef\_search}
-(histogramas de texto, 1\,024 dimensiones).}
-\small
+\scriptsize
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
 \textbf{Método} & \texttt{ef\_search} & \textbf{Media (ms)} & \textbf{QPS} &
-\textbf{Recall@k} \\
+\textbf{R@10} \\
 \midrule
-pgvector exacto & ---  & 47.82 & 21  & 1.00 \\
-pgvector HNSW   & 10   & 1.49  & 670 & 0.74 \\
-pgvector HNSW   & 20   & 1.48  & 676 & 0.85 \\
-pgvector HNSW   & 40   & 2.04  & 491 & 0.87 \\
-pgvector HNSW   & 80   & 2.72  & 368 & 0.93 \\
-pgvector HNSW   & 160  & 4.02  & 249 & 0.96 \\
+exacto (Seq Scan) & ---  & 47.82 & 21  & 1.00 \\
+HNSW              & 10   & 1.49  & 670 & 0.74 \\
+HNSW              & 20   & 1.48  & 676 & 0.85 \\
+HNSW              & 40   & 2.04  & 491 & 0.87 \\
+HNSW              & 80   & 2.72  & 368 & 0.93 \\
+HNSW              & 160  & 4.02  & 249 & 0.96 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\begin{figure}[h]
+\begin{figure}[htbp]
 \centering
-\includegraphics[width=0.48\textwidth]{ann_latency_vs_ef.png}\hfill
-\includegraphics[width=0.48\textwidth]{ann_recall_vs_latency.png}
-\caption{HNSW: latencia según \texttt{ef\_search} (izq.) y la curva
-recall--latencia (der.).}
+\includegraphics[width=\columnwidth]{ann_recall_vs_latency.png}
+\caption{HNSW: curva recall--latencia al variar \texttt{ef\_search}.}
+\label{fig:ann}
 \end{figure}
 
-\paragraph{Lectura.} HNSW es $\sim$12--32$\times$ más rápido que la búsqueda
-exacta (de 47.8\,ms a 1.5--4\,ms), a costa de \textit{recall}. El parámetro
-\texttt{ef\_search} controla el \textit{trade-off}: con \texttt{ef\_search}=160
-se alcanza recall $0.96$ manteniendo $\sim$250 QPS. Es el ejemplo de manual de
-``sacrificar exactitud por velocidad'' de la búsqueda aproximada. Nótese además
-que con los histogramas TF-IDF de 1\,024 dimensiones el grafo navega mejor que
-con vocabularios chicos: incluso \texttt{ef\_search}=10 ya rinde recall
-$0.74$ --- histogramas más discriminativos producen vecindarios más limpios.
+\textbf{Lectura.} HNSW es 12--32$\times$ más rápido que el escaneo exacto
+(47.8\,ms $\rightarrow$ 1.5--4\,ms) a costa de recall, y
+\texttt{ef\_search} controla el \textit{trade-off}: con 160 se alcanza
+recall $0.96$ a $\sim$250 QPS. Con histogramas TF-IDF de 1\,024 dimensiones el
+grafo navega mejor que con vocabularios chicos: incluso \texttt{ef\_search}=10
+rinde recall $0.74$.
 
-\subsection{Audio: índice propio vs.\ pgvector}
-Sobre las 1\,000 pistas de GTZAN, la búsqueda de similitud acústica por ambas
-vías devuelve \emph{exactamente el mismo ranking con los mismos puntajes}
-(ambos calculan coseno sobre los mismos histogramas de \textit{acoustic
-words}). Ejemplo con la pista \texttt{blues.00000.wav} como consulta:
+\subsection{Audio: propio vs.\ pgvector}
+Sobre las 1\,000 pistas de GTZAN, ambas vías devuelven \emph{exactamente el
+mismo ranking con los mismos puntajes} (coseno sobre los mismos histogramas
+de acoustic words). Ejemplo con \texttt{blues.00000.wav}:
+top-3 $=$ \{\texttt{rock.00071} (0.7321), \texttt{blues.00059} (0.6058),
+\texttt{blues.00080} (0.5999)\}. La latencia fue $\sim$0.4\,ms (propio)
+frente a $\sim$10--12\,ms (pgvector): con histogramas dispersos, el índice
+invertido compacto responde lo mismo a una fracción del costo.
 
-\begin{table}[h]
-\centering
-\caption{Similitud acústica: mismo top-3 por ambas vías.}
-\small
-\begin{tabular}{@{}lrr@{}}
-\toprule
-\textbf{Vecino} & \textbf{Coseno} & \textbf{Género} \\
-\midrule
-\texttt{rock.00071.wav}  & 0.7321 & rock \\
-\texttt{blues.00059.wav} & 0.6058 & blues \\
-\texttt{blues.00080.wav} & 0.5999 & blues \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\noindent
-La latencia del índice invertido propio fue $\sim$0.4\,ms frente a
-$\sim$10--12\,ms de pgvector para la misma consulta: la coincidencia exacta de
-resultados con esa diferencia de costo ilustra el valor del índice invertido
-compacto cuando los histogramas son dispersos.
-
-% ---------------------------------------------------------------------------
-\section{Análisis de trade-offs y conclusiones}
+% ══════════════════════════════════════════════════════════════
+\section{Análisis de Trade-offs y Conclusiones}
 
 \begin{itemize}
-  \item \textbf{¿Qué técnica ganó en qué métrica?} En \emph{latencia}, el
-        índice invertido propio gana hasta corpus medianos ($\le$10K chunks) y
-        \texttt{GIN} lo empata en el corpus completo; en \emph{memoria} gana el
-        propio (solo \textit{postings}, sin estructura nativa). En
-        \emph{búsqueda vectorial}, HNSW domina la latencia (12--32$\times$
-        sobre el escaneo exacto) al precio de \textit{recall}.
-  \item \textbf{¿Se recupera la misma información?} El índice invertido y
-        \texttt{pgvector} coinciden \emph{exactamente} (recall $=1.0$ en todos
-        los tamaños, y en audio con puntajes idénticos), porque ambos rankean
-        por coseno sobre el mismo histograma TF-IDF. \texttt{GIN} responde otra
-        pregunta (coincidencia booleana de \textit{tokens}), por eso su
-        \textit{recall} contra el coseno es bajo (0.04--0.08).
-  \item \textbf{Exactitud vs.\ velocidad.} La cuantización del codebook y el ANN
-        introducen falsos positivos/negativos; a cambio, el sistema es
-        ultra-rápido y compacto. La calidad depende de $k$ (con $k{=}1024$ el
-        vocabulario cubre mucho mejor las consultas que con $k{=}256$, a costa
-        de \textit{posting lists} más largas) y de \texttt{ef\_search}.
+  \item \textbf{¿Qué técnica ganó en qué métrica?} En latencia, el índice
+        propio gana hasta corpus medianos y GIN lo empata en el corpus
+        completo; en memoria gana el propio (solo postings). En búsqueda
+        vectorial, HNSW domina la latencia (12--32$\times$) al precio de
+        recall.
+  \item \textbf{¿Se recupera la misma información?} El índice propio y
+        pgvector coinciden exactamente (recall $=1.0$; en audio con puntajes
+        idénticos) porque comparten la matemática. GIN responde una semántica
+        booleana distinta (recall 0.04--0.08 frente al coseno).
+  \item \textbf{Exactitud vs.\ velocidad.} La cuantización y el ANN
+        introducen falsos positivos/negativos; a cambio el sistema es rápido
+        y compacto. La calidad depende de $k$ y de \texttt{ef\_search}.
   \item \textbf{Memoria vs.\ latencia.} pgvector es cómodo (SQL puro) y
-        devuelve lo mismo que el motor propio, pero con $k{=}1024$ la tabla de
-        histogramas pesa $\sim$400\,MB y el escaneo denso llega a 76\,ms;
-        \texttt{GIN} se mantiene en $\sim$27\,MB; el índice invertido propio es
-        minúsculo pero hay que mantener su código.
+        devuelve lo mismo que el motor propio, pero con $k{=}1024$ pesa
+        $\sim$400\,MB y el escaneo denso llega a 76\,ms; GIN se mantiene en
+        $\sim$27\,MB.
 \end{itemize}
 
-\paragraph{Limitaciones.} El histograma de texto degenera si el vocabulario es
-menor que $k$; la cuantización pierde detalle fino de los descriptores; y los
-índices HNSW quedan acoplados a la dimensión del codebook (hay que reindexar si
-$k$ cambia).
+\textbf{Limitaciones.} La cuantización pierde detalle fino de los
+descriptores; las dimensiones de los índices HNSW quedan acopladas a la $k$
+del codebook (cambiar una implica reindexar); y el histograma de texto
+degenera si el vocabulario es menor que $k$.
 
-\paragraph{Recomendaciones.} Usar el índice invertido propio como motor primario
-(rápido y barato); \texttt{pgvector} + HNSW cuando se quiera delegar la búsqueda
-vectorial a la base de datos; y reservar \texttt{GIN} para búsqueda literal por
+\textbf{Recomendación.} Usar el índice invertido propio como motor primario
+(rápido y barato); pgvector+HNSW cuando se quiera delegar la búsqueda
+vectorial a la base de datos; y reservar GIN para búsqueda literal por
 palabras clave, no para similitud.
 
-% ---------------------------------------------------------------------------
-\section{Instalación y uso}
+\subsection*{Reproducibilidad}
+El repositorio incluye Docker Compose (PostgreSQL + pgvector + scripts de
+inicialización), el \textit{ingest} por modalidad y los scripts de benchmark
+que generan las tablas y figuras de este informe. Las instrucciones de
+instalación y uso están en el \texttt{README} y en \texttt{docs/MANUAL.md}.
 
-\begin{lstlisting}
-# 1. Levantar todo (db + backend + frontend)
-docker compose up --build           # db:5432  backend:8000  frontend:5173
+% ══════════════════════════════════════════════════════════════
+\begin{thebibliography}{00}
 
-# 2. Construir los indices (una vez, tras bajar los datasets a data/raw/)
-python -m pipelines.ingest --app music     --modality text  --data <csv>  --k 1024 --persist
-python -m pipelines.ingest --app ecommerce --modality image --data <dir>  --k 512  --persist
-python -m pipelines.ingest --app music     --modality audio --data <csv>  --k 128  --persist
+\bibitem{b1}
+C. D. Manning, P. Raghavan, and H. Sch\"utze,
+\textit{Introduction to Information Retrieval}.
+Cambridge, U.K.: Cambridge Univ. Press, 2008, cap. 4--6 (SPIMI, TF-IDF,
+similitud coseno).
 
-# 3. Usar
-#   GUI:            http://localhost:5173
-#   API (Swagger):  http://localhost:8000/docs
-#   Health:         curl http://localhost:8000/health
-\end{lstlisting}
+\bibitem{b2}
+D. G. Lowe,
+``Distinctive image features from scale-invariant keypoints,''
+\textit{Int. J. Computer Vision}, vol. 60, no. 2, pp. 91--110, 2004.
+DOI: \url{https://doi.org/10.1023/B:VISI.0000029664.99615.94}
 
-Detalle de uso de cada aplicación y de la consola SQL multimodal en
-\texttt{docs/MANUAL.md}.
+\bibitem{b3}
+J. Sivic and A. Zisserman,
+``Video Google: A text retrieval approach to object matching in videos,''
+in \textit{Proc. 9th IEEE Int. Conf. Computer Vision (ICCV)},
+Nice, France, 2003, pp. 1470--1477.
+DOI: \url{https://doi.org/10.1109/ICCV.2003.1238663}
+
+\bibitem{b4}
+Y. A. Malkov and D. A. Yashunin,
+``Efficient and robust approximate nearest neighbor search using
+hierarchical navigable small world graphs,''
+\textit{IEEE Trans. Pattern Anal. Mach. Intell.}, vol. 42, no. 4,
+pp. 824--836, 2020.
+DOI: \url{https://doi.org/10.1109/TPAMI.2018.2889473}
+
+\bibitem{b5}
+G. Tzanetakis and P. Cook,
+``Musical genre classification of audio signals,''
+\textit{IEEE Trans. Speech Audio Process.}, vol. 10, no. 5,
+pp. 293--302, 2002.
+DOI: \url{https://doi.org/10.1109/TSA.2002.800560}
+
+\end{thebibliography}
 
 \end{document}
