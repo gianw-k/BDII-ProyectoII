@@ -39,16 +39,18 @@ CREATE TABLE IF NOT EXISTS histograms (
 
 -- Indice HNSW coseno para la busqueda aproximada con pgvector.
 -- `hist` es `vector` sin dimension y HNSW necesita una fija, asi que indexamos
--- la expresion casteada a vector(256) (la k del codebook), con un indice parcial
--- por modalidad. La query usa `hist::vector(256)` para que el planner lo tome.
--- Sin estos indices pgvector corre como Seq Scan (busqueda exacta); con ellos,
--- aproximada.
+-- la expresion casteada a vector(k) -- la k del codebook de cada modalidad --
+-- con un indice parcial por modalidad. La query castea igual para que el
+-- planner lo tome. Sin estos indices pgvector corre como Seq Scan (busqueda
+-- exacta); con ellos, aproximada.
+-- OJO: la dimension esta acoplada al `k` del ingest; si cambias uno, cambia
+-- el otro (tope de HNSW en pgvector: 2000 dims).
 CREATE INDEX IF NOT EXISTS idx_hist_hnsw_text
-    ON histograms USING hnsw ((hist::vector(256)) vector_cosine_ops)
+    ON histograms USING hnsw ((hist::vector(1024)) vector_cosine_ops)
     WHERE modality = 'text';
--- imagen fusiona SIFT (256) + color HSV (32) = 288 dimensiones
+-- imagen fusiona SIFT (512 visual words) + color HSV (32) = 544 dimensiones
 CREATE INDEX IF NOT EXISTS idx_hist_hnsw_image
-    ON histograms USING hnsw ((hist::vector(288)) vector_cosine_ops)
+    ON histograms USING hnsw ((hist::vector(544)) vector_cosine_ops)
     WHERE modality = 'image';
 -- audio: histograma de acoustic words (k=128 del codebook MFCC)
 CREATE INDEX IF NOT EXISTS idx_hist_hnsw_audio

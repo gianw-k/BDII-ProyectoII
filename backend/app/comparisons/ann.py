@@ -10,9 +10,9 @@ El recall del aproximado se compara contra el exacto, que es el que devuelve el
 vecino más cercano de verdad.
 
 La columna `hist` es `vector` sin dimensión y HNSW necesita una fija, así que el
-índice y la query castean a `vector(256)`. El índice es parcial por modalidad y
-sobre esa expresión, por eso la query usa `hist::vector(256)` igual para que el
-planner lo reconozca.
+índice y la query castean a `vector(dim)`, donde dim es la k del codebook de la
+modalidad (texto 1024). El índice es parcial por modalidad y sobre esa
+expresión, por eso la query castea igual para que el planner lo reconozca.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ import numpy as np
 
 from app.comparisons import timed
 
-DIM = 256
+DIM = 1024   # dimension del histograma de texto (= k del codebook)
 
 
 # --------------------------------------------------------------------- índice

@@ -133,11 +133,11 @@ Cargar datos y persistir en Postgres (dentro del contenedor backend):
 ```bash
 # música (texto)
 docker compose exec backend python -m pipelines.ingest \
-  --app music --data /data/raw/spotify/spotify_songs.csv --k 256 --persist
+  --app music --data /data/raw/spotify/spotify_songs.csv --k 1024 --persist
 
 # e-commerce (imagen)
 docker compose exec backend python -m pipelines.ingest \
-  --app ecommerce --modality image --data /data/raw/fashion/images --k 256 --persist
+  --app ecommerce --modality image --data /data/raw/fashion/images --k 512 --persist
 ```
 
 - UI: http://localhost:5173 — pestañas para las 2 apps.
