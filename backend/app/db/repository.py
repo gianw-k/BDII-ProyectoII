@@ -37,8 +37,13 @@ def reset(conn, app: str, modality: str) -> None:
     with conn.cursor() as cur:
         cur.execute("DELETE FROM codebook WHERE modality = %s", (modality,))
         cur.execute("DELETE FROM inverted_index WHERE modality = %s", (modality,))
-        # borrar los items arrastra (CASCADE) sus chunks e histogramas
-        cur.execute("DELETE FROM items WHERE app = %s", (app,))
+        # borrar los items arrastra (CASCADE) sus chunks e histogramas.
+        # Filtra por app Y modalidad: 'music' tiene texto y audio, y sin el
+        # filtro el ingest de una modalidad borraba los datos de la otra.
+        cur.execute(
+            "DELETE FROM items WHERE app = %s AND modality = %s",
+            (app, modality),
+        )
 
 
 def persist_index(conn, data: IndexData, *, ts_config: str = "spanish") -> dict:
