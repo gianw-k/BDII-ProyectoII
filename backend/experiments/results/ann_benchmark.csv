@@ -1,7 +1,7 @@
 method,ef_search,mean_ms,p95_ms,qps,recall_at_k
-pgvector_exact,,54.3853,58.974,18.4,1.0
-pgvector_hnsw,10,0.8245,1.771,1212.9,0.55
-pgvector_hnsw,20,0.733,0.897,1364.2,0.705
-pgvector_hnsw,40,0.9681,1.229,1032.9,0.845
-pgvector_hnsw,80,1.1616,1.582,860.9,0.89
-pgvector_hnsw,160,1.7109,2.315,584.5,0.922
+pgvector_exact,,47.8243,53.875,20.9,1.0
+pgvector_hnsw,10,1.492,2.174,670.2,0.742
+pgvector_hnsw,20,1.4798,2.345,675.8,0.85
+pgvector_hnsw,40,2.0359,2.888,491.2,0.874
+pgvector_hnsw,80,2.7198,3.909,367.7,0.934
+pgvector_hnsw,160,4.0163,5.191,249.0,0.962
