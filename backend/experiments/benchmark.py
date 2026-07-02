@@ -28,6 +28,7 @@ from pathlib import Path
 import numpy as np
 
 from app.apps.music.text_index import build
+from app.core.config import settings
 from app.db.adapters import text_index_to_data
 from app.db.repository import persist_index
 from app.db.session import connect
@@ -89,13 +90,18 @@ def db_index_sizes(conn) -> dict:
     return {"gin_bytes": gin, "histograms_bytes": hist}
 
 
-def run(data: str, sizes: list[int], k: int, n_queries: int) -> list[dict]:
+def run(data: str, sizes: list[int], k: int, n_queries: int,
+        codebook_k: int | None = None) -> list[dict]:
+    # k = top-n de la busqueda (el "k" del recall@k). codebook_k = tamano del
+    # vocabulario; antes se usaba el mismo valor para ambos y salia un codebook
+    # degenerado. Ademas debe coincidir con la dimension del HNSW de texto.
+    codebook_k = codebook_k or settings.codebook_k
     base = load_songs(data)
     conn = connect()
     rows = []
     for n in sizes:
         corpus = make_corpus(base, n)
-        idx = build(corpus, tempfile.mkdtemp(), k=k, block_size=2000)
+        idx = build(corpus, tempfile.mkdtemp(), k=codebook_k, block_size=2000)
         persist_index(conn, text_index_to_data(idx))
         conn.commit()
 
@@ -191,11 +197,13 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Benchmark Fase 4 (texto)")
     p.add_argument("--data", required=True)
     p.add_argument("--sizes", type=int, nargs="+", default=[100, 500, 1000])
-    p.add_argument("--k", type=int, default=10)
+    p.add_argument("--k", type=int, default=10, help="top-n de la busqueda (recall@k)")
+    p.add_argument("--codebook-k", type=int, default=None,
+                   help="tamano del vocabulario (default: settings.codebook_k)")
     p.add_argument("--n-queries", type=int, default=30)
     args = p.parse_args()
 
-    rows = run(args.data, args.sizes, args.k, args.n_queries)
+    rows = run(args.data, args.sizes, args.k, args.n_queries, args.codebook_k)
     save_csv(rows, RESULTS / "text_benchmark.csv")
     plot(rows, RESULTS)
 
