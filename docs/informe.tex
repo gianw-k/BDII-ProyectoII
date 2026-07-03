@@ -96,8 +96,8 @@ por similitud coseno.
 Los objetivos son: (1) implementar la arquitectura unificada de punta a punta;
 (2) persistirla en PostgreSQL; (3) compararla contra los índices nativos del
 motor (GIN/GiST para texto, \texttt{pgvector} para vectores); y (4) evaluar
-experimentalmente latencia, throughput, \textit{recall} y memoria para
-cuantificar los \textit{trade-offs}.
+experimentalmente latencia, throughput, \textit{recall}, memoria y accesos de
+E/S para cuantificar los \textit{trade-offs}.
 
 \subsection{Aplicaciones implementadas}
 El backend soporta tres aplicaciones (el enunciado exige al menos dos):
@@ -110,6 +110,19 @@ El backend soporta tres aplicaciones (el enunciado exige al menos dos):
   \item \textbf{Consola de consultas multimodal}: un mini-lenguaje tipo SQL
         que unifica las búsquedas de las tres modalidades.
 \end{enumerate}
+
+\subsection{Requisitos funcionales y no funcionales}
+\textbf{Funcionales}: búsqueda top-$N$ por letra (full-text), por imagen de
+consulta y por similitud acústica (audio subido o pista existente), cada una
+con su puntaje de similitud; consultas unificadas vía el mini-lenguaje;
+comparación en vivo de cada búsqueda contra la técnica nativa equivalente de
+PostgreSQL; e ingest reproducible por modalidad con persistencia en la base.
+\textbf{No funcionales}: latencia interactiva (objetivo $<$100\,ms por
+consulta en el corpus completo, que el motor propio cumple con holgura:
+4.5\,ms en texto), throughput de cientos de consultas/s, bajo consumo de
+memoria del índice propio (solo \textit{postings}), precisión medible
+(recall@10 contra una referencia exacta) y despliegue con un solo comando
+(Docker Compose).
 
 % ══════════════════════════════════════════════════════════════
 \section{Arquitectura del Sistema}
@@ -316,11 +329,11 @@ docker compose exec backend \
 
 \subsection{Reproducir los experimentos}
 \begin{lstlisting}
-# comparativa de texto (4 tamanos de corpus)
+# comparativa de texto (cargas de 1K a 100K)
 docker compose exec backend \
   python -m experiments.benchmark \
   --data /data/raw/spotify/spotify_songs.csv \
-  --sizes 1000 5000 10000 18454
+  --sizes 1000 5000 10000 18454 100000
 
 # HNSW vs busqueda exacta
 docker compose exec backend \
@@ -475,37 +488,49 @@ Sin el índice, pgvector ejecuta un \textit{Seq Scan} (búsqueda exacta); con
 \section{Evaluación Experimental}
 
 \subsection{Texto: propio vs.\ GIN vs.\ pgvector}
-Se corrió la misma batería de 30 consultas sobre corpus de 1K, 5K, 10K y
-18\,454 chunks (Tabla~\ref{tab:texto}); el recall@10 toma como referencia el
-ranking coseno del índice propio. Las Figs.~\ref{fig:latencia} y
-\ref{fig:memoria} muestran latencia y memoria según el tamaño.
+Se corrió la misma batería de 30 consultas sobre cargas de 1K (pequeña), 5K,
+10K (mediana), 18\,454 (corpus real completo) y 100K chunks (grande, reciclando
+el corpus para alcanzar el tamaño), según los rangos que pide el enunciado
+(Tabla~\ref{tab:texto}). El recall@10 toma como referencia el ranking coseno
+del índice propio. Los \emph{accesos de E/S} se miden por consulta: para los
+métodos nativos, bloques de 8\,KB tocados según
+\texttt{EXPLAIN (ANALYZE, BUFFERS)}; para el índice propio (residente en RAM
+tras cargarse), el equivalente es la cantidad de \textit{postings} que recorre
+el \textit{accumulator}. Las Figs.~\ref{fig:latencia}--\ref{fig:io} muestran
+latencia, memoria y E/S según el tamaño.
 
 \begin{table}[htbp]
-\caption{Comparativa de texto por tamaño de corpus ($k{=}1024$)}
+\caption{Comparativa de texto por tamaño de corpus ($k{=}1024$). E/S por
+consulta: bloques de 8\,KB para los nativos, postings recorridos ($^{p}$)
+para el propio.}
 \label{tab:texto}
 \centering
 \scriptsize
-\begin{tabular}{@{}rlrrrr@{}}
+\begin{tabular}{@{}rlrrrrr@{}}
 \toprule
 \textbf{Corpus} & \textbf{Método} & \textbf{Media} & \textbf{p95} &
-\textbf{QPS} & \textbf{R@10} \\
- & & (ms) & (ms) & & \\
+\textbf{QPS} & \textbf{R@10} & \textbf{E/S} \\
+ & & (ms) & (ms) & & & \\
 \midrule
-1\,000  & índice invertido & 0.44  & 0.71  & 2284 & 1.00 \\
-        & GIN full-text    & 1.45  & 1.97  & 688  & 0.07 \\
-        & pgvector coseno  & 10.35 & 12.00 & 97   & 1.00 \\
+1\,000   & propio   & 0.50   & 1.03    & 1982 & 1.00 & 397$^{p}$ \\
+         & GIN      & 2.31   & 4.47    & 433  & 0.07 & 597 \\
+         & pgvector & 17.64  & 20.07   & 57   & 1.00 & 13\,948 \\
 \midrule
-5\,000  & índice invertido & 1.21  & 2.20  & 824  & 1.00 \\
-        & GIN full-text    & 1.23  & 1.73  & 810  & 0.08 \\
-        & pgvector coseno  & 22.99 & 24.47 & 44   & 1.00 \\
+5\,000   & propio   & 1.32   & 2.21    & 758  & 1.00 & 2\,025$^{p}$ \\
+         & GIN      & 1.40   & 1.84    & 714  & 0.08 & 500 \\
+         & pgvector & 25.74  & 28.34   & 39   & 1.00 & 58\,094 \\
 \midrule
-10\,000 & índice invertido & 2.14  & 3.64  & 466  & 1.00 \\
-        & GIN full-text    & 2.51  & 4.63  & 399  & 0.05 \\
-        & pgvector coseno  & 25.84 & 29.91 & 39   & 1.00 \\
+10\,000  & propio   & 2.45   & 3.84    & 409  & 1.00 & 4\,106$^{p}$ \\
+         & GIN      & 3.00   & 5.96    & 333  & 0.05 & 1\,052 \\
+         & pgvector & 30.23  & 34.88   & 33   & 1.00 & 81\,658 \\
 \midrule
-18\,454 & índice invertido & 4.49  & 7.36  & 223  & 1.00 \\
-        & GIN full-text    & 3.67  & 9.54  & 273  & 0.04 \\
-        & pgvector coseno  & 76.08 & 88.75 & 13   & 1.00 \\
+18\,454  & propio   & 4.94   & 7.78    & 202  & 1.00 & 7\,632$^{p}$ \\
+         & GIN      & 4.01   & 13.04   & 250  & 0.04 & 1\,415 \\
+         & pgvector & 89.17  & 101.70  & 11   & 0.99 & 88\,670 \\
+\midrule
+100\,000 & propio   & 27.48  & 48.37   & 36   & 1.00 & 40\,764$^{p}$ \\
+         & GIN      & 11.25  & 40.99   & 89   & 0.00 & 6\,846 \\
+         & pgvector & 724.35 & 1035.92 & 1.4  & 0.95 & 665\,018 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -524,16 +549,31 @@ ranking coseno del índice propio. Las Figs.~\ref{fig:latencia} y
 \label{fig:memoria}
 \end{figure}
 
-\textbf{Lectura.} El índice propio domina la latencia hasta $\sim$10K chunks;
-en el corpus completo GIN lo empata (3.7 vs.\ 4.5\,ms) porque el vocabulario
-de $k{=}1024$ engorda las posting lists propias (889\,366 postings).
-\texttt{pgvector} recupera \emph{exactamente} lo mismo que el motor propio
-(recall $=1.0$ en todos los tamaños: ambos rankean por coseno sobre el mismo
-histograma TF-IDF), pero paga la distancia densa de 1\,024 dimensiones
-(76\,ms y $\sim$400\,MB de histogramas frente a $\sim$27\,MB del GIN). El
-recall de GIN frente al coseno es bajo y cae al crecer el corpus
-($0.07 \rightarrow 0.04$): la coincidencia booleana de tokens responde una
-pregunta distinta a la del ranking por similitud.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{io_vs_size.png}
+\caption{Accesos de E/S de los índices nativos (bloques de 8\,KB por
+consulta, medidos con \texttt{EXPLAIN BUFFERS}).}
+\label{fig:io}
+\end{figure}
+
+\textbf{Lectura.} El índice propio domina la latencia hasta $\sim$10K chunks
+con recall perfecto; a partir del corpus completo GIN lo alcanza y en 100K lo
+supera claramente (11.2 vs.\ 27.5\,ms): sus posting lists comprimidas escalan
+mejor que las del índice en RAM, cuyas listas crecen con el corpus (de
+889\,K a 4.8\,M de postings). \texttt{pgvector} exacto recupera lo mismo que
+el motor propio (recall $\ge 0.95$, con $1.0$ hasta 10K: ambos rankean por
+coseno sobre el mismo histograma TF-IDF) pero su escaneo denso colapsa en la
+carga grande: 724\,ms y \textbf{665\,mil bloques de 8\,KB por consulta}
+($\sim$5\,GB de páginas tocadas), contra $\sim$6.8\,K bloques del GIN. La
+métrica de E/S explica las latencias: pgvector lee toda la tabla de
+histogramas en cada consulta, GIN solo las posting lists de los términos, y
+el índice propio ni siquiera toca disco (recorre en RAM entre 397 y 40\,K
+postings por consulta). El recall de GIN frente al coseno es bajo y cae con
+el corpus ($0.07 \rightarrow 0.00$): la coincidencia booleana de tokens
+responde una pregunta distinta a la del ranking por similitud (en 100K,
+además, el corpus reciclado introduce duplicados que empatan en
+\texttt{ts\_rank} y hacen su top-10 arbitrario).
 
 \subsection{ANN: HNSW vs.\ búsqueda exacta}
 Ambas vías ejecutan la misma consulta coseno; solo cambia si el planner usa
@@ -588,21 +628,24 @@ invertido compacto responde lo mismo a una fracción del costo.
 
 \begin{itemize}
   \item \textbf{¿Qué técnica ganó en qué métrica?} En latencia, el índice
-        propio gana hasta corpus medianos y GIN lo empata en el corpus
-        completo; en memoria gana el propio (solo postings). En búsqueda
-        vectorial, HNSW domina la latencia (12--32$\times$) al precio de
-        recall.
+        propio gana hasta corpus medianos ($\le$10K); en la carga grande
+        (100K) GIN toma la delantera (11 vs.\ 27\,ms) y pgvector exacto
+        colapsa (724\,ms). En memoria y E/S gana el propio (solo postings,
+        en RAM). En búsqueda vectorial, HNSW domina la latencia
+        (12--32$\times$) al precio de recall.
   \item \textbf{¿Se recupera la misma información?} El índice propio y
-        pgvector coinciden exactamente (recall $=1.0$; en audio con puntajes
-        idénticos) porque comparten la matemática. GIN responde una semántica
-        booleana distinta (recall 0.04--0.08 frente al coseno).
+        pgvector coinciden (recall $\ge 0.95$, exacto hasta 10K; en audio
+        con puntajes idénticos) porque comparten la matemática. GIN responde
+        una semántica booleana distinta (recall $\le$0.08 frente al coseno).
   \item \textbf{Exactitud vs.\ velocidad.} La cuantización y el ANN
         introducen falsos positivos/negativos; a cambio el sistema es rápido
         y compacto. La calidad depende de $k$ y de \texttt{ef\_search}.
-  \item \textbf{Memoria vs.\ latencia.} pgvector es cómodo (SQL puro) y
-        devuelve lo mismo que el motor propio, pero con $k{=}1024$ pesa
-        $\sim$400\,MB y el escaneo denso llega a 76\,ms; GIN se mantiene en
-        $\sim$27\,MB.
+  \item \textbf{Memoria / E/S vs.\ latencia.} pgvector es cómodo (SQL puro)
+        y devuelve lo mismo que el motor propio, pero con $k{=}1024$ su
+        tabla llega a $\sim$0.9\,GB en la carga de 100K y cada consulta
+        exacta toca $\sim$665\,K bloques ($\sim$5\,GB de páginas); GIN se
+        mantiene en 27--63\,MB y dos órdenes de magnitud menos bloques. La
+        E/S medida es justamente la que explica el orden de las latencias.
 \end{itemize}
 
 \textbf{Limitaciones.} La cuantización pierde detalle fino de los

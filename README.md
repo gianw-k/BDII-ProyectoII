@@ -106,22 +106,40 @@ carpetas. Luego corre el ingest (ver más abajo) para construir los índices.
 
 ## Resultados experimentales
 
-Benchmark de texto sobre datos reales (Spotify), cargas de 1K/5K/10K/18.454
-canciones, 30 consultas cada una, codebook k=1024. Generado con
+Benchmark de texto sobre datos reales (Spotify), cargas de
+1K/5K/10K/18.454/**100K** canciones (la de 100K recicla el corpus, como pide
+el enunciado: pequeña 1K, mediana 10K, grande 100K), 30 consultas cada una,
+codebook k=1024. Generado con
 [experiments/benchmark.py](backend/experiments/benchmark.py).
 
-Resultados con el corpus completo (18.454 canciones):
+La columna **I/O** son los accesos por consulta: bloques de 8KB tocados según
+`EXPLAIN (ANALYZE, BUFFERS)` para los nativos; para el índice propio (que vive
+en RAM) el equivalente son los postings que recorre el accumulator.
 
-| Enfoque | Latencia media | p95 | Throughput | Recall@10 vs propio |
-|---------|---------------:|----:|-----------:|--------------------:|
-| Índice invertido (propio) | 4.5 ms | 7.4 ms | 223 q/s | 1.00 (ref.) |
-| GIN full-text | **3.7 ms** | 9.5 ms | **273 q/s** | 0.04 |
-| pgvector coseno (exacto) | 76.1 ms | 88.8 ms | 13 q/s | **1.00** |
+Corpus real completo (18.454 canciones):
+
+| Enfoque | Latencia media | p95 | Throughput | Recall@10 | I/O por consulta |
+|---------|---------------:|----:|-----------:|----------:|-----------------:|
+| Índice invertido (propio) | 4.9 ms | 7.8 ms | 202 q/s | 1.00 (ref.) | 7.6K postings |
+| GIN full-text | **4.0 ms** | 13.0 ms | **250 q/s** | 0.04 | 1.4K bloques |
+| pgvector coseno (exacto) | 89.2 ms | 101.7 ms | 11 q/s | **0.99** | 88.7K bloques |
+
+Carga grande (100.000 canciones):
+
+| Enfoque | Latencia media | p95 | Throughput | Recall@10 | I/O por consulta |
+|---------|---------------:|----:|-----------:|----------:|-----------------:|
+| Índice invertido (propio) | 27.5 ms | 48.4 ms | 36 q/s | 1.00 (ref.) | 40.8K postings |
+| GIN full-text | **11.2 ms** | 41.0 ms | **89 q/s** | 0.00* | **6.8K bloques** |
+| pgvector coseno (exacto) | 724 ms | 1036 ms | 1.4 q/s | 0.95 | 665K bloques (~5 GB) |
+
+\* con el corpus reciclado hay duplicados que empatan en `ts_rank` y hacen el
+top-10 de GIN arbitrario; su recall contra el coseno ya era ~0.04 sin duplicados.
 
 ![Latencia vs tamaño](backend/experiments/results/latency_vs_size.png)
 ![Throughput vs tamaño](backend/experiments/results/throughput_vs_size.png)
 ![Recall vs tamaño](backend/experiments/results/recall_vs_size.png)
 ![Memoria de índices nativos](backend/experiments/results/memory_vs_size.png)
+![Accesos I/O de los nativos](backend/experiments/results/io_vs_size.png)
 
 ### ANN: HNSW vs búsqueda exacta
 
@@ -142,17 +160,23 @@ recall/latencia barriendo `hnsw.ef_search`. Generado con
 ### Análisis y trade-offs
 
 - **Latencia / throughput:** el índice invertido propio gana hasta ~10K chunks;
-  en el corpus completo GIN lo empata (el vocabulario k=1024 engorda las
-  posting lists propias: 889K postings). HNSW acelera la búsqueda vectorial
-  12–32× frente al escaneo exacto.
-- **Recall:** pgvector recupera **exactamente lo mismo** que el motor propio
-  (recall 1.0 en todos los tamaños; en audio hasta con los mismos scores),
-  lógico porque ambos hacen coseno sobre los mismos histogramas TF-IDF. GIN
-  recupera un conjunto distinto (recall ~0.04): hace match booleano de términos
-  + `ts_rank`, no similitud de histograma. No es "peor", es otra semántica.
-- **Memoria:** GIN se mantiene en ~27 MB; la tabla de histogramas llega a
-  ~400 MB con k=1024. *Nota:* `histograms` guarda las tres modalidades, así que
-  su tamaño es una cota superior para el texto.
+  en el corpus completo GIN lo empata y en 100K lo supera (11 vs 27 ms): sus
+  posting lists comprimidas escalan mejor que las del índice en RAM, que crecen
+  de 889K a 4.8M postings. pgvector exacto colapsa en la carga grande (724 ms).
+  HNSW acelera la búsqueda vectorial 12–32× frente al escaneo exacto.
+- **Recall:** pgvector recupera lo mismo que el motor propio (recall ≥0.95,
+  exacto hasta 10K; en audio hasta con los mismos scores), lógico porque ambos
+  hacen coseno sobre los mismos histogramas TF-IDF. GIN recupera un conjunto
+  distinto (recall ~0.04): hace match booleano de términos + `ts_rank`, no
+  similitud de histograma. No es "peor", es otra semántica.
+- **I/O (la métrica que explica todo):** por consulta, pgvector exacto lee la
+  tabla completa de histogramas (665K bloques ≈ 5 GB en 100K), GIN solo las
+  posting lists de los términos (1.4–6.8K bloques), y el propio ni toca disco
+  (recorre 0.4–41K postings en RAM). El orden de las latencias es exactamente
+  el orden de la E/S.
+- **Memoria:** GIN va de ~27 a ~63 MB; la tabla de histogramas llega a ~0.9 GB
+  en la carga de 100K. *Nota:* `histograms` guarda las tres modalidades, así
+  que su tamaño es una cota superior para el texto.
 
 **Conclusión:** para búsqueda por similitud, el índice invertido + codebook es
 el motor primario (rápido y compacto); pgvector+HNSW es la vía nativa cuando se
@@ -198,9 +222,9 @@ docker compose exec backend python -m pipelines.ingest \
 Benchmarks de la Fase 4 (generan CSV + gráficos en `experiments/results/`):
 
 ```bash
-# comparativa de texto por tamaño de corpus
+# comparativa de texto por tamaño de corpus (1K a 100K, con métrica de I/O)
 docker compose exec backend python -m experiments.benchmark \
-  --data /data/raw/spotify/spotify_songs.csv --sizes 1000 5000 10000 18454
+  --data /data/raw/spotify/spotify_songs.csv --sizes 1000 5000 10000 18454 100000
 
 # HNSW vs búsqueda exacta
 docker compose exec backend python -m experiments.ann_benchmark
