@@ -90,6 +90,31 @@ def db_index_sizes(conn) -> dict:
     return {"gin_bytes": gin, "histograms_bytes": hist}
 
 
+def _pg_io_blocks(conn, sql: str, params: tuple) -> float:
+    """Accesos a disco de una consulta: bloques de 8KB tocados (hit + read).
+
+    Corre la consulta con EXPLAIN (ANALYZE, BUFFERS) y suma los buffers
+    compartidos del plan (el nodo raiz ya acumula a sus hijos). Se mide fuera
+    del loop de latencia para no contaminar los tiempos.
+    """
+    with conn.cursor() as cur:
+        cur.execute("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + sql, params)
+        plan = cur.fetchone()[0][0]["Plan"]
+    return float(plan.get("Shared Hit Blocks", 0) + plan.get("Shared Read Blocks", 0))
+
+
+def _own_postings_visited(idx, q: str) -> float:
+    """Trabajo del indice propio: cuantos postings recorre la consulta.
+
+    El indice vive en RAM tras cargarse, asi que su I/O de disco por consulta
+    es 0; el equivalente honesto de "accesos" es el largo de las posting lists
+    de las codewords de la query (lo unico que toca el accumulator).
+    """
+    from app.engine.index.histogram import to_sparse
+    q_sparse = to_sparse(idx.codebook.quantize(q))
+    return float(sum(len(idx.index.get(w)) for w, _ in q_sparse))
+
+
 def run(data: str, sizes: list[int], k: int, n_queries: int,
         codebook_k: int | None = None) -> list[dict]:
     # k = top-n de la busqueda (el "k" del recall@k). codebook_k = tamano del
@@ -108,6 +133,7 @@ def run(data: str, sizes: list[int], k: int, n_queries: int,
         queries = pick_queries(idx, n_queries=n_queries)
         lat = {"inverted_index": [], "gin_fulltext": [], "pgvector_cosine": []}
         recall = {"gin_fulltext": [], "pgvector_cosine": []}
+        io = {"inverted_index": [], "gin_fulltext": [], "pgvector_cosine": []}
 
         for q in queries:
             own = cmp.own_search(idx, q, top_n=k)
@@ -119,6 +145,21 @@ def run(data: str, sizes: list[int], k: int, n_queries: int,
             recall["gin_fulltext"].append(_recall_at_k(own["results"], gin["results"]))
             recall["pgvector_cosine"].append(_recall_at_k(own["results"], vec["results"]))
 
+            # accesos I/O por consulta (aparte del loop de tiempos)
+            io["inverted_index"].append(_own_postings_visited(idx, q))
+            io["gin_fulltext"].append(
+                _pg_io_blocks(conn, cmp.GIN_SQL, ("spanish", q, k)))
+            q_hist = np.asarray(idx.codebook.quantize(q), dtype=np.float32)
+            if np.any(q_hist):
+                io["pgvector_cosine"].append(
+                    _pg_io_blocks(conn, cmp.VEC_SQL, (q_hist, k)))
+
+        # unidad de I/O por metodo: el propio corre en RAM (se cuentan los
+        # postings que recorre); los nativos tocan buffers de 8KB en Postgres.
+        io_units = {"inverted_index": "postings",
+                    "gin_fulltext": "bloques_8kb",
+                    "pgvector_cosine": "bloques_8kb"}
+
         sizes_db = db_index_sizes(conn)
         for method, samples in lat.items():
             if not samples:
@@ -126,6 +167,9 @@ def run(data: str, sizes: list[int], k: int, n_queries: int,
             row = {"corpus_size": n, "method": method, **_latency_stats(samples)}
             row["recall_at_k"] = (round(statistics.mean(recall[method]), 3)
                                   if method in recall else 1.0)   # propio = referencia
+            row["io_mean"] = (round(statistics.mean(io[method]), 1)
+                              if io[method] else "")
+            row["io_unit"] = io_units[method]
             row["postings"] = idx.index.num_postings if method == "inverted_index" else ""
             row["native_index_bytes"] = (sizes_db["gin_bytes"] if method == "gin_fulltext"
                                          else sizes_db["histograms_bytes"] if method == "pgvector_cosine"
@@ -190,6 +234,17 @@ def plot(rows: list[dict], out_dir: Path) -> None:
     plt.xlabel("canciones"); plt.ylabel("tamano del indice (MB)")
     plt.title("Memoria de los indices nativos"); plt.legend(); plt.grid(True, alpha=0.3)
     plt.savefig(out_dir / "memory_vs_size.png", dpi=120, bbox_inches="tight")
+
+    # accesos I/O de los nativos (bloques de 8KB por consulta, EXPLAIN BUFFERS)
+    # el indice propio se reporta aparte en postings porque corre en RAM
+    plt.figure()
+    for m in [x for x in methods if x != "inverted_index"]:
+        ys = [next(r["io_mean"] for r in rows if r["method"] == m and r["corpus_size"] == n)
+              for n in sizes]
+        plt.plot(sizes, ys, marker="d", label=m)
+    plt.xlabel("canciones"); plt.ylabel("bloques de 8KB por consulta")
+    plt.title("Accesos I/O de los indices nativos"); plt.legend(); plt.grid(True, alpha=0.3)
+    plt.savefig(out_dir / "io_vs_size.png", dpi=120, bbox_inches="tight")
     print(f"[bench] graficos -> {out_dir}")
 
 
