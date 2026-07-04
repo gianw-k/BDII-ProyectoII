@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS chunks (
     position  INT,                      -- orden dentro del item
     content   TEXT                      -- texto del chunk (solo modalidad texto)
 );
+-- Sin este indice, el CASCADE de borrar items hace un seq scan de chunks por
+-- cada item (O(n^2)): borrar un corpus de 100K tardaba horas. Mismo caso que
+-- idx_inverted_chunk mas abajo.
+CREATE INDEX IF NOT EXISTS idx_chunks_item ON chunks (item_id);
 
 -- Codebook: palabras visuales/acusticas (centroides) o textuales
 CREATE TABLE IF NOT EXISTS codebook (
