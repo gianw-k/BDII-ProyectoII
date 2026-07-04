@@ -1,0 +1,4 @@
+config,coherencia_genero,n_tracks
+"vieja (40 MFCC, sin Z-score)",0.271,1000
+nueva (57 feats + Z-score),0.518,1000
+baseline_azar,0.1,

@@ -1,0 +1,21 @@
+### Búsqueda de letra: 'fire burning love' (motor propio) ###
+  0.7018  Volcanic Love - The Aces
+  0.7018  Volcanic Love - The Aces
+  0.5881  In The Air - Axwell Edit - TV Rock
+  0.5622  Venus - Bananarama
+  0.5340  Burning Heart - From "Rocky IV" Soundtrack - Survivor
+
+### Comparativa de letra 'ocean waves' (3 métodos) ###
+  inverted_index  : 3 res, 1.46 ms
+  gin_fulltext    : 3 res, 36.97 ms
+  pgvector_cosine : 3 res, 401.03 ms
+
+### Similitud de audio: metal.00000.wav (propio vs pgvector) ###
+  inverted_index:
+     0.958  metal.00004.wav (metal)
+     0.9471  metal.00001.wav (metal)
+     0.9166  metal.00007.wav (metal)
+  pgvector_cosine:
+     0.958  metal.00004.wav ()
+     0.9471  metal.00001.wav ()
+     0.9166  metal.00007.wav ()

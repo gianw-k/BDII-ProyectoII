@@ -1,0 +1,5 @@
+vista,coherencia_tipo,coherencia_color
+SIFT solo (512),0.408,0.215
+color solo (32),0.317,0.486
+fusion (544),0.446,0.288
+baseline_azar,0.051,0.098
