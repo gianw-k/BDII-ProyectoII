@@ -170,7 +170,7 @@ modalidad; el índice y la búsqueda se comparten.}
 \textbf{Etapa} & \textbf{Texto} & \textbf{Imagen} & \textbf{Audio} \\
 \midrule
 Split      & estrofas & imagen del producto & ventanas de 3\,s \\
-Extractor  & tokens (nltk) & SIFT 128-d & MFCC 40-d \\
+Extractor  & tokens (nltk) & SIFT 128-d & 57 features acúst. \\
 Codebook   & top-$k$, $k{=}1024$ & K-Means, $k{=}512$ & K-Means, $k{=}128$ \\
 Ponderación& \multicolumn{3}{c}{$\log(1{+}\mathrm{tf})\cdot\mathrm{idf}$, normalización $L_2$} \\
 Índice     & \multicolumn{3}{c}{SPIMI $\rightarrow$ índice invertido (compartido)} \\
@@ -354,9 +354,11 @@ Postgres se saltan si no hay base disponible).
         44\,326 fotos de productos de moda ($\sim$965\,000 descriptores SIFT
         en total).
   \item \textbf{Audio:} \textit{GTZAN} (Kaggle): 1\,000 pistas de 30\,s en
-        10 géneros; se usan las ventanas de 3\,s con 20 MFCC (media +
-        varianza $=40$ características por ventana) y los \texttt{.wav} para
-        la reproducción desde la interfaz.
+        10 géneros; se usan las ventanas de 3\,s con 57 características
+        acústicas por ventana (20 MFCC media$+$varianza $=40$, más chroma,
+        RMS, centroide y ancho de banda espectral, \textit{rolloff}, tasa de
+        cruces por cero, componentes armónica/percusiva y tempo) y los
+        \texttt{.wav} para la reproducción desde la interfaz.
 \end{itemize}
 
 El \textit{ingest} acepta \texttt{.csv}, \texttt{.json} y \texttt{.parquet}
@@ -371,10 +373,17 @@ y mapea columnas por alias, por lo que los datasets son intercambiables.
 (\texttt{SnowballStemmer}); el codebook son las $k$ raíces más frecuentes de
 la colección. \textbf{Imagen}: descriptores locales SIFT y, como
 complemento, un histograma de color HSV de 32 bins (SIFT trabaja en escala de
-grises y en moda el color discrimina). \textbf{Audio}: MFCC por ventana
-deslizante. Para imagen y audio, el codebook se obtiene con
-\texttt{MiniBatchKMeans} sobre todos los descriptores de la colección: los
-$k$ centroides son las \textit{visual words} / \textit{acoustic words}.
+grises y en moda el color discrimina). \textbf{Audio}: 57 características
+espectrales (MFCC + descriptores tímbricos) por ventana deslizante. Para
+imagen y audio, el codebook se obtiene con \texttt{MiniBatchKMeans} sobre
+todos los descriptores de la colección: los $k$ centroides son las
+\textit{visual words} / \textit{acoustic words}. Antes del \textit{clustering}
+los descriptores se estandarizan con \textbf{Z-score} (a cada dimensión se le
+resta su media y se divide por su desviación): sin esto, en el vector acústico
+las características de escala grande (tempo $\sim$120, \textit{rolloff} de
+miles de Hz) dominarían la distancia euclidiana del K-Means y aplastarían a
+las de escala pequeña (tasa de cruces por cero $\sim$0.1); la estandarización
+les da a todas el mismo peso.
 
 \subsection{Cuantización TF-IDF}
 Cada chunk se representa como un histograma de codewords ponderado con TF

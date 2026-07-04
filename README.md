@@ -25,7 +25,7 @@ CONTENIDO → SPLIT (chunks) → EXTRACTOR (features) → CODEBOOK → ÍNDICE I
 | Etapa | Texto | Imagen | Audio |
 |-------|-------|--------|-------|
 | Split | párrafos / estrofas | la imagen del producto | ventanas de 3 s |
-| Extractor | tokens (nltk) | SIFT (128-d) + color HSV | MFCC (40-d) |
+| Extractor | tokens (nltk) | SIFT (128-d) + color HSV | 57 features acústicas (MFCC + espectrales) |
 | Codebook | top-k palabras, k=1024 | K-Means, k=512 (visual words) | K-Means, k=128 (acoustic words) |
 | Ponderación | log(1+tf)·idf, normalización L2 | ídem | ídem |
 | Índice | SPIMI → índice invertido | el mismo índice | el mismo índice |
@@ -43,8 +43,10 @@ es lo que hace la arquitectura "agnóstica".
 - **Imagen:** *Fashion Product Images (Small)* (Kaggle, `paramaggarwal/...`) —
   ~44.000 imágenes de productos de moda.
 - **Audio:** *GTZAN* (Kaggle, `andradaolteanu/...`) — 1.000 pistas de 30 s en
-  10 géneros. Se usan las ventanas de 3 s con 20 MFCC (`features_3_sec.csv`) y
-  los `.wav` (`genres_original/`) para reproducir las pistas desde la UI.
+  10 géneros. Se usan las ventanas de 3 s con 57 características acústicas (20
+  MFCC media+var + chroma, RMS, centroide y ancho de banda espectral, rolloff,
+  ZCR, armonía/percusión y tempo) del `features_3_sec.csv`, y los `.wav`
+  (`genres_original/`) para reproducir las pistas desde la UI.
 
 El ingest acepta `.csv` / `.json` / `.parquet` y mapea columnas por alias, así
 que el dataset es intercambiable.
@@ -90,8 +92,9 @@ carpetas. Luego corre el ingest (ver más abajo) para construir los índices.
 - **Codebook** — [linguistic.py](backend/app/engine/codebook/linguistic.py)
   (top-k con tokenizar/stopwords/stemming) y
   [kmeans.py](backend/app/engine/codebook/kmeans.py) (MiniBatchKMeans → visual /
-  acoustic words). Ambos ponderan con TF-IDF sublineal (log(1+tf)·idf) y
-  producen histogramas L2-normalizados.
+  acoustic words, con estandarización Z-score de los descriptores antes del
+  clustering para que features de distinta escala pesen igual). Ambos ponderan
+  con TF-IDF sublineal (log(1+tf)·idf) y producen histogramas L2-normalizados.
 - **Índice invertido** — [spimi.py](backend/app/engine/index/spimi.py)
   (Single-Pass In-Memory Indexing, obligatorio para texto: vuelca bloques a
   disco y hace k-way merge) + [inverted.py](backend/app/engine/index/inverted.py).
