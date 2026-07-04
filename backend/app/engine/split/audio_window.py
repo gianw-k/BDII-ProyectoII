@@ -19,8 +19,18 @@ import numpy as np
 
 from app.engine.base import Splitter
 
-# Columnas de features que forman el vector acustico (mismo orden que el CSV GTZAN)
-_MFCC_COLS = (
+# Columnas de features que forman el vector acustico (orden sincronizado con mfcc.py)
+_MFCC_COLS = [
+    "chroma_stft_mean", "chroma_stft_var",
+    "rms_mean", "rms_var",
+    "spectral_centroid_mean", "spectral_centroid_var",
+    "spectral_bandwidth_mean", "spectral_bandwidth_var",
+    "rolloff_mean", "rolloff_var",
+    "zero_crossing_rate_mean", "zero_crossing_rate_var",
+    "harmony_mean", "harmony_var",
+    "perceptr_mean", "perceptr_var",
+    "tempo",
+] + (
     [f"mfcc{i}_mean" for i in range(1, 21)] +
     [f"mfcc{i}_var"  for i in range(1, 21)]
 )
