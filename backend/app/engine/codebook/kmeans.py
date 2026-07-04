@@ -53,23 +53,32 @@ class KMeansCodebook(Codebook):
             raise ValueError("no hay descriptores para construir el codebook")
         self.dim = int(stacked.shape[1])
         
+        # Submuestreo para evitar OOM y eternización en fit
+        MAX_SAMPLES = 500000
+        if stacked.shape[0] > MAX_SAMPLES:
+            np.random.seed(self.seed)
+            indices = np.random.choice(stacked.shape[0], MAX_SAMPLES, replace=False)
+            sampled = stacked[indices]
+        else:
+            sampled = stacked
+            
         # 1. Ajustar StandardScaler (Z-score normalization)
-        self.scaler_mean = np.mean(stacked, axis=0).astype(np.float32)
-        self.scaler_scale = np.std(stacked, axis=0).astype(np.float32)
+        self.scaler_mean = np.mean(sampled, axis=0).astype(np.float32)
+        self.scaler_scale = np.std(sampled, axis=0).astype(np.float32)
         self.scaler_scale[self.scaler_scale == 0] = 1.0  # evitar division por cero
         
         # Aplicar estandarizacion
-        stacked = (stacked - self.scaler_mean) / self.scaler_scale
+        sampled = (sampled - self.scaler_mean) / self.scaler_scale
 
         # no tiene sentido pedir mas clusters que muestras
-        k_eff = int(min(self.k, stacked.shape[0]))
+        k_eff = int(min(self.k, sampled.shape[0]))
         km = MiniBatchKMeans(
             n_clusters=k_eff,
             random_state=self.seed,
-            batch_size=min(self.batch_size, stacked.shape[0]),
+            batch_size=min(self.batch_size, sampled.shape[0]),
             n_init="auto",
         )
-        km.fit(stacked)
+        km.fit(sampled)
         self.centroids = km.cluster_centers_.astype(np.float32)
 
         # IDF por visual word: en cuantos items aparece cada centroide (DF).
@@ -79,6 +88,9 @@ class KMeansCodebook(Codebook):
         N = len(items)
         df = np.zeros(self.centroids.shape[0], dtype=np.float64)
         for arr in items:
+            # Estandarizar arr antes de asignar (si aplica)
+            if self.scaler_mean is not None and self.scaler_scale is not None:
+                arr = (arr - self.scaler_mean) / self.scaler_scale
             present = np.unique(self._assign(arr))
             df[present] += 1.0
         self.idf = np.log10(N / np.maximum(df, 1.0)).astype(np.float32)

@@ -71,15 +71,18 @@ class SIFTExtractor(Extractor):
             else:
                 img = arr
 
-        # Estandarizar el lado mayor antes de extraer. SIFT depende de la densidad
-        # local de pixeles, asi que ingest y query deben usar el mismo tope para que
-        # el vocabulario visual (codebook) no colapse al comparar resoluciones.
-        # Configurable via settings.image_max_side (env IMAGE_MAX_SIDE).
-        max_side = settings.image_max_side
+        target_side = settings.image_max_side
         h, w = img.shape[:2]
-        if max(h, w) > max_side:
-            scale = max_side / max(h, w)
+        
+        # Estandarizar estrictamente la resolución para que el vocabulario visual (codebook) 
+        # compare peras con peras. Las consultas y la ingesta deben extraer al mismo tamaño.
+        if max(h, w) > target_side:
+            scale = target_side / max(h, w)
             new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
             img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        elif max(h, w) < target_side:
+            scale = target_side / max(h, w)
+            new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
 
         return img
