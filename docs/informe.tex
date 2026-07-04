@@ -632,6 +632,59 @@ top-3 $=$ \{\texttt{rock.00076} (0.7925), \texttt{blues.00057} (0.7716),
 frente a $\sim$20\,ms (pgvector): con histogramas dispersos, el índice
 invertido compacto responde lo mismo a una fracción del costo.
 
+\subsection{Calidad de resultados (con etiquetas del dataset)}
+Los benchmarks anteriores miden velocidad y acuerdo entre métodos, no si los
+resultados son \emph{correctos}. Para medir calidad usamos las etiquetas de los
+datasets: el \textbf{género} en GTZAN y el \textbf{tipo/color} en Fashion. La
+métrica es la \emph{coherencia}: fracción de los 10 vecinos recuperados que
+comparten la etiqueta de la consulta (1.0 = perfecto; el azar depende del
+número de clases).
+
+En \textbf{audio}, comparamos la configuración vieja (40 MFCC, sin
+estandarizar) contra la nueva (57 características + Z-score): la coherencia de
+género pasó de \textbf{0.271 a 0.518} (el azar es 0.10), casi el doble y
+5$\times$ sobre el azar --- evidencia cuantitativa de que enriquecer las
+features y estandarizarlas mejora la recuperación. En \textbf{imagen},
+descomponer el histograma fusionado muestra el aporte de cada parte
+(Tabla~\ref{tab:calidad}): SIFT acierta mejor el tipo, el color acierta mejor
+el color, y la fusión gana en tipo (0.446) y mejora el color respecto a SIFT
+solo --- justificando la fusión con números.
+
+\begin{table}[htbp]
+\caption{Coherencia de resultados @10 (fracción de vecinos con la misma
+etiqueta). Azar: tipo 0.05, color 0.10.}
+\label{tab:calidad}
+\centering
+\scriptsize
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Representación de imagen} & \textbf{Coher.\ tipo} & \textbf{Coher.\ color} \\
+\midrule
+SIFT solo (512) & 0.408 & 0.215 \\
+Color solo (32) & 0.317 & \textbf{0.486} \\
+Fusión (544) & \textbf{0.446} & 0.288 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+La Fig.~\ref{fig:montaje} muestra búsquedas visuales reales: cada fila es una
+consulta y sus 5 productos más similares, con coherencia de categoría casi
+perfecta (camisetas, billeteras, zapatos).
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\columnwidth]{image_montage.png}
+\caption{Búsqueda visual real sobre Fashion: consulta (rojo) + top-5.}
+\label{fig:montaje}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\columnwidth]{ui_ecommerce.png}
+\caption{La aplicación en funcionamiento: se sube una camisa a cuadros y el
+sistema devuelve 10 productos similares (todas camisas a cuadros) con su
+puntaje de similitud.}
+\label{fig:ui}
+\end{figure}
+
 % ══════════════════════════════════════════════════════════════
 \section{Análisis de Trade-offs y Conclusiones}
 
