@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     # que es el maximo de dimensiones que indexa el HNSW de pgvector.
     codebook_k: int = 1024
     top_n: int = 10        # resultados por consulta
-    image_max_side: int = 256
+    image_max_side: int = 512
 
 
 settings = Settings()
