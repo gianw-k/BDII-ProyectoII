@@ -31,6 +31,9 @@ class KMeansCodebook(Codebook):
         self.centroids: np.ndarray | None = None   # (k_eff, dim)
         self.dim: int | None = None
         self.idf: np.ndarray = np.array([])  # (k_eff,) peso IDF por visual word
+        # Parametros de estandarizacion (Z-score) para mezclar caracteristicas de distinta escala
+        self.scaler_mean: np.ndarray | None = None
+        self.scaler_scale: np.ndarray | None = None
 
     # ------------------------------------------------------------------ build
     def build(self, all_features: Iterable[np.ndarray]) -> None:
@@ -49,6 +52,15 @@ class KMeansCodebook(Codebook):
         if stacked.size == 0:
             raise ValueError("no hay descriptores para construir el codebook")
         self.dim = int(stacked.shape[1])
+        
+        # 1. Ajustar StandardScaler (Z-score normalization)
+        self.scaler_mean = np.mean(stacked, axis=0).astype(np.float32)
+        self.scaler_scale = np.std(stacked, axis=0).astype(np.float32)
+        self.scaler_scale[self.scaler_scale == 0] = 1.0  # evitar division por cero
+        
+        # Aplicar estandarizacion
+        stacked = (stacked - self.scaler_mean) / self.scaler_scale
+
         # no tiene sentido pedir mas clusters que muestras
         k_eff = int(min(self.k, stacked.shape[0]))
         km = MiniBatchKMeans(
@@ -83,6 +95,10 @@ class KMeansCodebook(Codebook):
         if feats.size == 0:
             return hist  # item sin descriptores: histograma en cero y listo
 
+        # Estandarizar features en tiempo de inferencia si el modelo fue ajustado
+        if self.scaler_mean is not None and self.scaler_scale is not None:
+            feats = (feats - self.scaler_mean) / self.scaler_scale
+
         labels = self._assign(feats)
         counts = np.bincount(labels, minlength=k).astype(np.float32)
         hist[: counts.shape[0]] = counts
@@ -111,9 +127,12 @@ class KMeansCodebook(Codebook):
         """Guarda los centroides (.npz) + la meta (.json). `path` = nombre base."""
         base = Path(path)
         base.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(
-            base.with_suffix(".npz"), centroids=self.centroids, idf=self.idf
-        )
+        save_dict = {"centroids": self.centroids, "idf": self.idf}
+        if self.scaler_mean is not None:
+            save_dict["scaler_mean"] = self.scaler_mean
+            save_dict["scaler_scale"] = self.scaler_scale
+            
+        np.savez_compressed(base.with_suffix(".npz"), **save_dict)
         base.with_suffix(".json").write_text(
             json.dumps({"k": self.k, "dim": self.dim, "seed": self.seed}),
             encoding="utf-8",
@@ -128,6 +147,11 @@ class KMeansCodebook(Codebook):
         data = np.load(base.with_suffix(".npz"))
         cb.centroids = data["centroids"].astype(np.float32)
         cb.idf = data["idf"].astype(np.float32) if "idf" in data else np.array([])
+        
+        if "scaler_mean" in data and "scaler_scale" in data:
+            cb.scaler_mean = data["scaler_mean"].astype(np.float32)
+            cb.scaler_scale = data["scaler_scale"].astype(np.float32)
+            
         return cb
 
     # to_dict / from_dict: comodo para tests y codebooks chicos (todo en un JSON)
