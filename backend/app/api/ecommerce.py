@@ -19,7 +19,7 @@ router = APIRouter()
 @lru_cache(maxsize=1)
 def _visual_index() -> VisualIndex:
     """Carga perezosa del indice visual (artefactos del ingest)."""
-    idx_dir = Path(settings.data_dir) / "index" / "ecommerce_visual"
+    idx_dir = Path(settings.data_dir) / "index" / "ecommerce_image"
     if not (idx_dir / "index.json").exists():
         raise HTTPException(
             status_code=503,
