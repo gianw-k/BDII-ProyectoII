@@ -12,8 +12,8 @@ Esto permite que el pipeline de ingest use el CSV de features ya calculadas
 sube el usuario en tiempo real (mas lento pero correcto academicamente).
 
 El extractor es invariante a la duracion del clip: siempre produce un
-vector de longitud fija (2*n_mfcc = 40 por defecto con n_mfcc=20),
-exactamente igual que las columnas mfcc1_mean..mfcc20_var del CSV GTZAN.
+vector de longitud fija (57 dimensiones), exactamente igual
+que las columnas extraidas del CSV GTZAN de 3 segundos.
 """
 from __future__ import annotations
 from pathlib import Path
@@ -54,13 +54,50 @@ class MFCCExtractor(Extractor):
 
         return self._from_audio(chunk)
 
+    def _extract_57_features(self, y_seg: np.ndarray, librosa) -> np.ndarray:
+        # Extraer caracteristicas adicionales de librosa
+        chroma = librosa.feature.chroma_stft(y=y_seg, sr=self.sr)
+        rms = librosa.feature.rms(y=y_seg)
+        spec_cent = librosa.feature.spectral_centroid(y=y_seg, sr=self.sr)
+        spec_bw = librosa.feature.spectral_bandwidth(y=y_seg, sr=self.sr)
+        rolloff = librosa.feature.spectral_rolloff(y=y_seg, sr=self.sr)
+        zcr = librosa.feature.zero_crossing_rate(y=y_seg)
+        y_harm, y_perc = librosa.effects.hpss(y_seg)
+        tempo, _ = librosa.beat.beat_track(y=y_seg, sr=self.sr)
+        tempo_val = float(tempo[0]) if isinstance(tempo, np.ndarray) else float(tempo)
+
+        # Extraer MFCCs
+        mfcc = librosa.feature.mfcc(y=y_seg, sr=self.sr, n_mfcc=self.n_mfcc)
+
+        features = [
+            chroma.mean(), chroma.var(),
+            rms.mean(), rms.var(),
+            spec_cent.mean(), spec_cent.var(),
+            spec_bw.mean(), spec_bw.var(),
+            rolloff.mean(), rolloff.var(),
+            zcr.mean(), zcr.var(),
+            y_harm.mean(), y_harm.var(),
+            y_perc.mean(), y_perc.var(),
+            tempo_val
+        ]
+
+        mfcc_mean = mfcc.mean(axis=1)
+        mfcc_var = mfcc.var(axis=1)
+
+        feat = np.concatenate([
+            np.array(features, dtype=np.float32),
+            mfcc_mean.astype(np.float32),
+            mfcc_var.astype(np.float32)
+        ])
+        return feat
+
     def _from_audio(self, source: Union[str, Path, bytes]) -> np.ndarray:
-        """Extrae features MFCC de un archivo de audio (ruta o bytes)."""
+        """Extrae features MFCC y demas espectrales de un archivo de audio (ruta o bytes)."""
         try:
             import librosa  # type: ignore
         except ImportError as e:  # pragma: no cover
             raise RuntimeError(
-                "librosa no disponible. Instala 'librosa' para extraer MFCC desde audio."
+                "librosa no disponible. Instala 'librosa' para extraer caracteristicas de audio."
             ) from e
 
         if isinstance(source, (bytes, bytearray)):
@@ -69,12 +106,22 @@ class MFCCExtractor(Extractor):
         else:
             y, _ = librosa.load(str(source), sr=self.sr, mono=True)
 
-        # Extraer n_mfcc coeficientes a lo largo del tiempo
-        mfcc = librosa.feature.mfcc(y=y, sr=self.sr, n_mfcc=self.n_mfcc)  # (n_mfcc, T)
+        window_size = int(3 * self.sr)
+        if len(y) <= window_size:
+            # Clip corto: un solo segmento
+            feat = self._extract_57_features(y, librosa)
+            return feat.reshape(1, -1)
 
-        # Reducir a un solo vector de longitud fija: [mean_1..mean_n, var_1..var_n]
-        mean = mfcc.mean(axis=1)   # (n_mfcc,)
-        var = mfcc.var(axis=1)     # (n_mfcc,)
-        feat = np.concatenate([mean, var]).astype(np.float32)  # (2*n_mfcc,)
+        # Clip largo: dividir en ventanas de 3 segundos sin solapamiento
+        feats = []
+        for start in range(0, len(y), window_size):
+            end = start + window_size
+            # Si el ultimo fragmento es menor a 0.5s, lo ignoramos para evitar ruido
+            if end > len(y) and (len(y) - start) < int(0.5 * self.sr):
+                continue
+            y_seg = y[start:min(end, len(y))]
+            feat = self._extract_57_features(y_seg, librosa)
+            feats.append(feat)
 
-        return feat.reshape(1, -1)  # (1, 2*n_mfcc)
+        return np.stack(feats)
+
