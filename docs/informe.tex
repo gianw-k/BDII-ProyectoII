@@ -677,12 +677,33 @@ perfecta (camisetas, billeteras, zapatos).
 \label{fig:montaje}
 \end{figure}
 
+Las Figs.~\ref{fig:ui}--\ref{fig:ui-sql} muestran las tres pestañas de la
+aplicación con búsquedas reales: la búsqueda visual, la búsqueda musical por
+letra (con el fragmento coincidente resaltado) y la consola de consultas
+multimodal.
+
 \begin{figure}[htbp]\centering
 \includegraphics[width=\columnwidth]{ui_ecommerce.png}
 \caption{La aplicación en funcionamiento: se sube una camisa a cuadros y el
 sistema devuelve 10 productos similares (todas camisas a cuadros) con su
 puntaje de similitud.}
 \label{fig:ui}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\columnwidth]{ui_music.png}
+\caption{Búsqueda musical por letra: la consulta \textit{fire burning love}
+devuelve canciones rankeadas por TF-IDF coseno, con el fragmento de letra
+coincidente resaltado y reproducción de las pistas.}
+\label{fig:ui-music}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\columnwidth]{ui_console.png}
+\caption{Consola de consultas multimodal: una consulta tipo SQL con el
+operador \texttt{@@} sobre la letra se parsea y ejecuta contra el motor,
+mostrando los resultados en tabla.}
+\label{fig:ui-sql}
 \end{figure}
 
 % ══════════════════════════════════════════════════════════════
