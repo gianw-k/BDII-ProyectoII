@@ -245,8 +245,10 @@ los dos se versiona en el repositorio.
         acústica con reproducción de pistas) y consola de consultas
         multimodal.
   \item \textbf{Comparativas de la Fase 3}: GIN full-text y pgvector (exacto
-        y HNSW), expuestas como endpoints \texttt{/compare/*} para
-        demostrarlas en vivo.
+        y HNSW), expuestas como endpoints \texttt{/compare/*} y como una
+        pestaña \textit{Comparativas} en la interfaz que ejecuta la misma
+        consulta con ambos motores y muestra resultados y latencia lado a
+        lado (Fig.~\ref{fig:ui-compare}).
   \item \textbf{Evaluación experimental de la Fase 4}: scripts de benchmark
         que generan los CSV y los gráficos incluidos en este informe
         (\texttt{backend/experiments/results/}).
@@ -704,6 +706,14 @@ coincidente resaltado y reproducción de las pistas.}
 operador \texttt{@@} sobre la letra se parsea y ejecuta contra el motor,
 mostrando los resultados en tabla.}
 \label{fig:ui-sql}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\columnwidth]{ui_compare_text.png}
+\caption{Pestaña Comparativas: la misma consulta de letra por el índice
+invertido propio (5.3\,ms), GIN full-text (227\,ms) y pgvector (225\,ms),
+con los resultados de cada motor lado a lado.}
+\label{fig:ui-compare}
 \end{figure}
 
 % ══════════════════════════════════════════════════════════════
