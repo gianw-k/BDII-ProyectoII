@@ -35,11 +35,12 @@ Direcciones:
 
 ## 2. La interfaz
 
-La GUI tiene tres pestañas en la parte superior:
+La GUI tiene cuatro pestañas en la parte superior:
 
 1. **Visual E-commerce** — búsqueda de productos por imagen.
 2. **Búsqueda Musical** — búsqueda de canciones por letra o por audio.
 3. **Consola SQL** — el mismo motor desde un mini-lenguaje tipo SQL.
+4. **Comparativas** — la misma consulta por el motor propio y por PostgreSQL, lado a lado.
 
 ---
 
@@ -117,7 +118,28 @@ desconocida 'foo'"* o *"se esperaba 'WHERE'..."*.
 
 ---
 
-## 6. Problemas comunes
+## 6. Comparativas (motor propio vs PostgreSQL)
+
+Ejecuta la misma consulta con el índice invertido propio (SPIMI) y con las
+técnicas nativas de PostgreSQL, mostrando los resultados y la latencia de cada
+motor lado a lado (con barras comparativas).
+
+1. Abre la pestaña **Comparativas** y elige la modalidad:
+   - **Texto (letras)**: escribe un fragmento de letra. Compara índice
+     invertido propio vs **GIN full-text** vs **pgvector**.
+   - **Imagen (productos)**: escribe el ID de un producto del dataset
+     (p. ej. `15970`; se muestra la vista previa). Compara índice propio vs
+     **pgvector + HNSW**.
+   - **Audio (pistas)**: elige género y pista GTZAN. Compara índice propio vs
+     **pgvector + HNSW**.
+2. Pulsa **Comparar**.
+
+Requiere que los datos estén **persistidos en Postgres** (`ingest --persist`),
+porque el lado PostgreSQL consulta las tablas `chunks`/`histograms`.
+
+---
+
+## 7. Problemas comunes
 
 | Síntoma | Causa probable | Solución |
 |---------|----------------|----------|
